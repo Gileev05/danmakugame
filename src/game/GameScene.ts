@@ -15,8 +15,14 @@ const RESPAWN_INVULN_MS = 2000;
 const BULLET_WIDTH = 6;
 const BULLET_HEIGHT = 14;
 const BULLET_COLOR = 0xfff1a8;
-const BULLET_SPEED = 600;
-const FIRE_INTERVAL_MS = 160;
+// Скорость и темп стрельбы растут вместе с силой (0.00 → 4.00).
+const BULLET_BASE_SPEED = 400;
+const BULLET_SPEED_PER_POWER = 75;
+const FIRE_BASE_INTERVAL_MS = 200;
+const FIRE_INTERVAL_PER_POWER_MS = 25;
+// Количество пуль и полуугол разлёта по уровням силы.
+const SHOT_BULLETS = [1, 2, 3, 4, 5];
+const SHOT_SPREAD_DEG = [0, 4, 8, 12, 16];
 
 // ── Враги ───────────────────────────────────────────────
 const ENEMY_SIZE = 32;
@@ -38,13 +44,40 @@ const ENEMY_BULLET_SPEED = 240;
 // ── Счёт ────────────────────────────────────────────────
 const SCORE_PER_ENEMY = 100;
 
+// ── Предметы (Touhou) ───────────────────────────────────
+const POWER_MAX = 4.0;
+const POWER_PER_ITEM = 0.05;
+const SCORE_ITEM_VALUE = 30;
+const ITEM_SIZE = 10;
+const ITEM_FALL_SPEED = 90;
+const ITEM_MAGNET_RADIUS = 90; // предметы притягиваются к игроку
+const ITEM_MAGNET_SPEED = 420;
+const ITEM_SCATTER_SPEED_MIN = 60; // разлёт при взрыве
+const ITEM_SCATTER_SPEED_MAX = 200;
+const ITEM_SCATTER_DECAY = 3; // затухание разлёта, 1/с
+const ITEM_POWER_CHANCE_PERCENT = 40; // шанс очка силы среди остальных
+const ITEM_SCORE_COLOR = 0x4ade80; // зелёный — очки счёта
+const ITEM_POWER_COLOR = 0xfacc15; // жёлтый — очки силы
+
 type EnemyType = 'flyer' | 'shooter';
+type ItemType = 'score' | 'power';
+
+/** Уровень стрельбы по силе: 0.00–0.99 → 0, ..., 4.00 → 4. */
+function getShotTier(power: number): number {
+  if (power >= POWER_MAX) return 4;
+  if (power >= 3) return 3;
+  if (power >= 2) return 2;
+  if (power >= 1) return 1;
+  return 0;
+}
 
 /**
  * Danmaku-scroll shooter.
  *
  * Управление: стрелки — движение, Z — непрерывная стрельба вверх.
  * Враги появляются сверху: простые летят вниз, стрелки целятся в игрока.
+ * С врагов падают предметы: очки счёта (бонус к счёту) и очки силы
+ * (усиливают стрельбу от 0.00 до 4.00).
  * 3 жизни. Когда они заканчиваются — экран счёта и рестарт по R / Enter.
  */
 export class GameScene extends Phaser.Scene {
@@ -52,15 +85,18 @@ export class GameScene extends Phaser.Scene {
   private playerBullets!: Phaser.GameObjects.Group;
   private enemies!: Phaser.GameObjects.Group;
   private enemyBullets!: Phaser.GameObjects.Group;
+  private items!: Phaser.GameObjects.Group;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private fireKey!: Phaser.Input.Keyboard.Key;
 
   private livesText!: Phaser.GameObjects.Text;
   private scoreText!: Phaser.GameObjects.Text;
+  private powerText!: Phaser.GameObjects.Text;
 
   private lives = PLAYER_LIVES;
   private score = 0;
+  private power = 0;
   private gameOver = false;
   private fireCooldown = 0;
   private enemySpawnCooldown = 0;
@@ -74,6 +110,7 @@ export class GameScene extends Phaser.Scene {
     // Сброс состояния: объект сцены переживает рестарт.
     this.lives = PLAYER_LIVES;
     this.score = 0;
+    this.power = 0;
     this.gameOver = false;
     this.fireCooldown = 0;
     this.enemySpawnCooldown = 0;
@@ -86,6 +123,7 @@ export class GameScene extends Phaser.Scene {
     this.playerBullets = this.add.group();
     this.enemies = this.add.group();
     this.enemyBullets = this.add.group();
+    this.items = this.add.group();
 
     this.livesText = this.add.text(24, 20, '', {
       fontFamily: 'system-ui, sans-serif',
@@ -99,11 +137,16 @@ export class GameScene extends Phaser.Scene {
         color: '#ffffff',
       })
       .setOrigin(1, 0);
+    this.powerText = this.add.text(24, 52, '', {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '22px',
+      color: '#facc15',
+    });
     this.updateHud();
 
     // Подсказка по управлению.
     this.add
-      .text(width / 2, 26, '← ↑ ↓ → — движение, Z — стрельба', {
+      .text(width / 2, 26, '← ↑ ↓ → — движение, Z — стрельба, собирай предметы', {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '16px',
         color: '#94a3b8',
@@ -131,6 +174,7 @@ export class GameScene extends Phaser.Scene {
     this.handleSpawning(delta);
     this.updateEnemies(seconds);
     this.updateEnemyBullets(seconds);
+    this.updateItems(seconds);
     this.checkCollisions();
     this.updateInvulnerability();
   }
@@ -178,11 +222,26 @@ export class GameScene extends Phaser.Scene {
     this.fireCooldown -= delta;
     if (!this.fireKey.isDown || this.fireCooldown > 0) return;
 
-    this.spawnPlayerBullet();
-    this.fireCooldown = FIRE_INTERVAL_MS;
+    this.fireShot();
+    this.fireCooldown = FIRE_BASE_INTERVAL_MS - this.power * FIRE_INTERVAL_PER_POWER_MS;
   }
 
-  private spawnPlayerBullet(): void {
+  /** Выстрел: количество пуль и разлёт зависят от силы. */
+  private fireShot(): void {
+    const tier = getShotTier(this.power);
+    const count = SHOT_BULLETS[tier];
+    const halfSpread = SHOT_SPREAD_DEG[tier];
+    const speed = BULLET_BASE_SPEED + this.power * BULLET_SPEED_PER_POWER;
+
+    for (let i = 0; i < count; i++) {
+      // Угол пули: равномерно от -halfSpread до +halfSpread.
+      const angleDeg = count === 1 ? 0 : -halfSpread + (i * 2 * halfSpread) / (count - 1);
+      const rad = Phaser.Math.DegToRad(angleDeg);
+      this.spawnPlayerBullet(Math.sin(rad) * speed, -Math.cos(rad) * speed);
+    }
+  }
+
+  private spawnPlayerBullet(vx: number, vy: number): void {
     const bullet = this.add.rectangle(
       this.player.x,
       this.player.y - PLAYER_HEIGHT / 2 - BULLET_HEIGHT / 2,
@@ -191,6 +250,9 @@ export class GameScene extends Phaser.Scene {
       BULLET_COLOR,
     );
 
+    bullet.setData('vx', vx);
+    bullet.setData('vy', vy);
+
     this.playerBullets.add(bullet);
   }
 
@@ -198,9 +260,14 @@ export class GameScene extends Phaser.Scene {
     // Копия массива: внутри цикла пули могут уничтожаться.
     for (const child of [...this.playerBullets.getChildren()]) {
       const bullet = child as Phaser.GameObjects.Rectangle;
-      bullet.y -= BULLET_SPEED * seconds;
+      bullet.x += (bullet.getData('vx') as number) * seconds;
+      bullet.y += (bullet.getData('vy') as number) * seconds;
 
-      if (bullet.y + BULLET_HEIGHT / 2 < 0) {
+      if (
+        bullet.y + BULLET_HEIGHT / 2 < 0 ||
+        bullet.x < -BULLET_WIDTH ||
+        bullet.x > this.scale.width + BULLET_WIDTH
+      ) {
         bullet.destroy();
       }
     }
@@ -305,6 +372,73 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // ── Предметы ───────────────────────────────────────────
+
+  /** Враг роняет 3–5 предметов, разлетающихся как при взрыве. */
+  private dropItems(enemy: Phaser.GameObjects.Shape): void {
+    const count = Phaser.Math.Between(3, 5);
+    for (let i = 0; i < count; i++) {
+      // Первый предмет всегда очко силы, остальные — случайно.
+      const type: ItemType =
+        i === 0 || Phaser.Math.Between(1, 100) <= ITEM_POWER_CHANCE_PERCENT ? 'power' : 'score';
+      this.spawnItem(enemy.x, enemy.y, type);
+    }
+  }
+
+  private spawnItem(x: number, y: number, type: ItemType): void {
+    const color = type === 'score' ? ITEM_SCORE_COLOR : ITEM_POWER_COLOR;
+    const item = this.add.circle(x, y, ITEM_SIZE / 2, color);
+    item.setData('type', type);
+    // Случайное направление и скорость — эффект взрыва.
+    const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+    const speed = Phaser.Math.Between(ITEM_SCATTER_SPEED_MIN, ITEM_SCATTER_SPEED_MAX);
+    item.setData('vx', Math.cos(angle) * speed);
+    item.setData('vy', Math.sin(angle) * speed);
+    this.items.add(item);
+  }
+
+  private updateItems(seconds: number): void {
+    for (const child of [...this.items.getChildren()]) {
+      const item = child as Phaser.GameObjects.Arc;
+      const type = item.getData('type') as ItemType;
+
+      // Затухание разлёта после взрыва.
+      const decay = Math.exp(-ITEM_SCATTER_DECAY * seconds);
+      const vx = (item.getData('vx') as number) * decay;
+      const vy = (item.getData('vy') as number) * decay;
+      item.setData('vx', vx);
+      item.setData('vy', vy);
+
+      const dx = this.player.x - item.x;
+      const dy = this.player.y - item.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist < ITEM_MAGNET_RADIUS) {
+        // Магнит: предмет летит к игроку.
+        item.x += (dx / dist) * ITEM_MAGNET_SPEED * seconds;
+        item.y += (dy / dist) * ITEM_MAGNET_SPEED * seconds;
+      } else {
+        item.x += vx * seconds;
+        item.y += vy * seconds + ITEM_FALL_SPEED * seconds;
+      }
+
+      if (item.y - ITEM_SIZE > this.scale.height) {
+        item.destroy();
+        continue;
+      }
+
+      if (this.overlapsPlayerHitbox(item.x, item.y, ITEM_SIZE, ITEM_SIZE)) {
+        if (type === 'score') {
+          this.score += SCORE_ITEM_VALUE;
+        } else {
+          this.power = Math.min(POWER_MAX, this.power + POWER_PER_ITEM);
+        }
+        item.destroy();
+        this.updateHud();
+      }
+    }
+  }
+
   // ── Столкновения ───────────────────────────────────────
 
   private checkCollisions(): void {
@@ -328,6 +462,7 @@ export class GameScene extends Phaser.Scene {
           )
         ) {
           bullet.destroy();
+          this.dropItems(enemy);
           enemy.destroy();
           this.score += SCORE_PER_ENEMY;
           this.updateHud();
@@ -420,6 +555,7 @@ export class GameScene extends Phaser.Scene {
     this.playerBullets.clear(true, true);
     this.enemies.clear(true, true);
     this.enemyBullets.clear(true, true);
+    this.items.clear(true, true);
 
     const { width, height } = this.scale;
 
@@ -462,5 +598,6 @@ export class GameScene extends Phaser.Scene {
   private updateHud(): void {
     this.livesText.setText(`Жизни: ${this.lives}`);
     this.scoreText.setText(`Счёт: ${this.score}`);
+    this.powerText.setText(`Сила: ${this.power.toFixed(2)}`);
   }
 }
