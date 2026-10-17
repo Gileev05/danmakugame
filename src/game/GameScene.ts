@@ -43,7 +43,7 @@ type EnemyType = 'flyer' | 'shooter';
 /**
  * Danmaku-scroll shooter.
  *
- * Управление: стрелки / WASD — движение, Z — непрерывная стрельба вверх.
+ * Управление: стрелки — движение, Z — непрерывная стрельба вверх.
  * Враги появляются сверху: простые летят вниз, стрелки целятся в игрока.
  * 3 жизни. Когда они заканчиваются — экран счёта и рестарт по R / Enter.
  */
@@ -54,7 +54,6 @@ export class GameScene extends Phaser.Scene {
   private enemyBullets!: Phaser.GameObjects.Group;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
-  private wasd!: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
   private fireKey!: Phaser.Input.Keyboard.Key;
 
   private livesText!: Phaser.GameObjects.Text;
@@ -104,7 +103,7 @@ export class GameScene extends Phaser.Scene {
 
     // Подсказка по управлению.
     this.add
-      .text(width / 2, 26, '← ↑ ↓ → / WASD — движение, Z — стрельба', {
+      .text(width / 2, 26, '← ↑ ↓ → — движение, Z — стрельба', {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '16px',
         color: '#94a3b8',
@@ -117,12 +116,6 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.cursors = this.input.keyboard.createCursorKeys();
-    this.wasd = this.input.keyboard.addKeys({
-      up: Phaser.Input.Keyboard.KeyCodes.W,
-      down: Phaser.Input.Keyboard.KeyCodes.S,
-      left: Phaser.Input.Keyboard.KeyCodes.A,
-      right: Phaser.Input.Keyboard.KeyCodes.D,
-    }) as Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
     this.fireKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z);
   }
 
@@ -160,10 +153,10 @@ export class GameScene extends Phaser.Scene {
     let dx = 0;
     let dy = 0;
 
-    if (this.cursors.left.isDown || this.wasd.left.isDown) dx -= 1;
-    if (this.cursors.right.isDown || this.wasd.right.isDown) dx += 1;
-    if (this.cursors.up.isDown || this.wasd.up.isDown) dy -= 1;
-    if (this.cursors.down.isDown || this.wasd.down.isDown) dy += 1;
+    if (this.cursors.left.isDown) dx -= 1;
+    if (this.cursors.right.isDown) dx += 1;
+    if (this.cursors.up.isDown) dy -= 1;
+    if (this.cursors.down.isDown) dy += 1;
 
     if (dx === 0 && dy === 0) return;
 

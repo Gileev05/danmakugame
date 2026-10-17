@@ -29,11 +29,13 @@ body {
 }
 
 #game {
-  width: min(100%, 960px);
+  /* Ширина должна совпадать с width в src/game/config.ts */
+  width: min(100%, 600px);
   height: min(100%, 640px);
   min-height: 320px;
   border-radius: 12px;
   overflow: hidden;
+  border: 1px solid #334155;
   box-shadow: 0 12px 48px rgb(0 0 0 / 35%);
 }
 
