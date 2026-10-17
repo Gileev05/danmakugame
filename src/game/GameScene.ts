@@ -2,8 +2,8 @@ import Phaser from 'phaser';
 
 // ── Игрок ────────────────────────────────────────────────
 const PLAYER_SPEED = 260;
-const PLAYER_WIDTH = 38;
-const PLAYER_HEIGHT = 44;
+const PLAYER_WIDTH = 40;
+const PLAYER_HEIGHT = 50;
 const PLAYER_COLOR = 0x38bdf8;
 const PLAYER_EDGE_COLOR = 0x0ea5e9;
 const PLAYER_Y_MARGIN = 80;
@@ -23,6 +23,10 @@ const FIRE_INTERVAL_PER_POWER_MS = 25;
 // Количество пуль и полуугол разлёта по уровням силы.
 const SHOT_BULLETS = [1, 2, 3, 4, 5];
 const SHOT_SPREAD_DEG = [0, 4, 8, 12, 16];
+// Урон: пули и ракеты бьют по одному попаданию, лазер — постепенно.
+const BULLET_DAMAGE = 50;
+const ROCKET_DAMAGE = 60;
+const LASER_DPS = 60;
 
 // ── Враги ───────────────────────────────────────────────
 const ENEMY_SIZE = 32;
@@ -35,6 +39,7 @@ const ENEMY_SHOOTER_SPEED = 90;
 const ENEMY_SHOOTER_CHANCE_PERCENT = 35;
 const ENEMY_SPAWN_INTERVAL_MS = 1100;
 const ENEMY_SHOOT_INTERVAL_MS = 1500;
+const ENEMY_HP = 100;
 
 // ── Пули врагов ─────────────────────────────────────────
 const ENEMY_BULLET_RADIUS = 5;
@@ -44,7 +49,7 @@ const ENEMY_BULLET_SPEED = 240;
 // ── Счёт ────────────────────────────────────────────────
 const SCORE_PER_ENEMY = 100;
 
-// ── Предметы (Touhou) ───────────────────────────────────
+// ── Предметы ────────────────────────────────────────────
 const POWER_MAX = 4.0;
 const POWER_PER_ITEM = 0.05;
 const SCORE_ITEM_VALUE = 30;
@@ -59,8 +64,22 @@ const ITEM_POWER_CHANCE_PERCENT = 40; // шанс очка силы среди �
 const ITEM_SCORE_COLOR = 0x4ade80; // зелёный — очки счёта
 const ITEM_POWER_COLOR = 0xfacc15; // жёлтый — очки силы
 
+// ── Типы стрельбы ───────────────────────────────────────
+const SHOT_SELECT_POWER = 1.0; // при этой силе игрок выбирает тип
+const HOMING_TURN_RATE = 4; // рад/с — поворот самонаводки
+const HOMING_ACTIVATE_RADIUS = 120; // самонаводка включается рядом с врагом
+const HOMING_BULLET_SPEED = 420;
+const LASER_BASE_WIDTH = 6; // ширина одного луча
+const LASER_SPREAD_DEG = 8; // полуугол веера лазеров
+const ROCKET_BASE_SPEED = 380;
+const ROCKET_FIRE_INTERVAL_MS = 450; // ракеты стреляют медленнее
+const ROCKET_FIRE_INTERVAL_PER_POWER_MS = 25;
+const ROCKET_EXPLOSION_RADIUS = 60; // радиус взрыва ракеты
+
 type EnemyType = 'flyer' | 'shooter';
 type ItemType = 'score' | 'power';
+type ShotType = 'homing' | 'laser' | 'rocket';
+type BulletKind = 'basic' | 'homing' | 'rocket';
 
 /** Уровень стрельбы по силе: 0.00–0.99 → 0, ..., 4.00 → 4. */
 function getShotTier(power: number): number {
@@ -78,6 +97,8 @@ function getShotTier(power: number): number {
  * Враги появляются сверху: простые летят вниз, стрелки целятся в игрока.
  * С врагов падают предметы: очки счёта (бонус к счёту) и очки силы
  * (усиливают стрельбу от 0.00 до 4.00).
+ * При силе 1.00 игра останавливается и игрок выбирает тип стрельбы:
+ * 1 — самонаводка, 2 — лазеры, 3 — ракеты.
  * 3 жизни. Когда они заканчиваются — экран счёта и рестарт по R / Enter.
  */
 export class GameScene extends Phaser.Scene {
@@ -86,6 +107,8 @@ export class GameScene extends Phaser.Scene {
   private enemies!: Phaser.GameObjects.Group;
   private enemyBullets!: Phaser.GameObjects.Group;
   private items!: Phaser.GameObjects.Group;
+  private laserGraphics!: Phaser.GameObjects.Graphics;
+  private laserSegments: { ax: number; ay: number; bx: number; by: number }[] = [];
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private fireKey!: Phaser.Input.Keyboard.Key;
@@ -97,6 +120,9 @@ export class GameScene extends Phaser.Scene {
   private lives = PLAYER_LIVES;
   private score = 0;
   private power = 0;
+  private shotType: ShotType | null = null;
+  private choosingShot = false;
+  private shotMenuObjects: Phaser.GameObjects.GameObject[] = [];
   private gameOver = false;
   private fireCooldown = 0;
   private enemySpawnCooldown = 0;
@@ -111,6 +137,9 @@ export class GameScene extends Phaser.Scene {
     this.lives = PLAYER_LIVES;
     this.score = 0;
     this.power = 0;
+    this.shotType = null;
+    this.choosingShot = false;
+    this.shotMenuObjects = [];
     this.gameOver = false;
     this.fireCooldown = 0;
     this.enemySpawnCooldown = 0;
@@ -124,6 +153,9 @@ export class GameScene extends Phaser.Scene {
     this.enemies = this.add.group();
     this.enemyBullets = this.add.group();
     this.items = this.add.group();
+
+    // Лазер: рисуется линиями, пока не выбран тип — пусто.
+    this.laserGraphics = this.add.graphics();
 
     this.livesText = this.add.text(24, 20, '', {
       fontFamily: 'system-ui, sans-serif',
@@ -144,9 +176,9 @@ export class GameScene extends Phaser.Scene {
     });
     this.updateHud();
 
-    // Подсказка по управлению.
+    // Подсказка по управлению — внизу экрана.
     this.add
-      .text(width / 2, 26, '← ↑ ↓ → — движение, Z — стрельба, собирай предметы', {
+      .text(width / 2, height - 20, '← ↑ ↓ → — движение, Z — стрельба, собирай предметы', {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '16px',
         color: '#94a3b8',
@@ -163,7 +195,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    if (this.gameOver) return;
+    if (this.gameOver || this.choosingShot) return;
 
     const seconds = delta / 1000;
 
@@ -175,7 +207,8 @@ export class GameScene extends Phaser.Scene {
     this.updateEnemies(seconds);
     this.updateEnemyBullets(seconds);
     this.updateItems(seconds);
-    this.checkCollisions();
+    this.checkShotSelection();
+    this.checkCollisions(seconds);
     this.updateInvulnerability();
   }
 
@@ -187,8 +220,9 @@ export class GameScene extends Phaser.Scene {
     const halfH = PLAYER_HEIGHT / 2;
 
     return this.add
-      .triangle(x, y, -halfW, halfH, halfW, halfH, 0, -halfH, PLAYER_COLOR)
-      .setStrokeStyle(2, PLAYER_EDGE_COLOR);
+      .triangle(x, y, -halfW + 20, halfH, halfW + 20, halfH, 20, -halfH, PLAYER_COLOR)
+      .setStrokeStyle(2, PLAYER_EDGE_COLOR)
+      .setOrigin(0.5, 0.5);
   }
 
   // ── Движение игрока ────────────────────────────────────
@@ -220,14 +254,39 @@ export class GameScene extends Phaser.Scene {
 
   private handleFiring(delta: number): void {
     this.fireCooldown -= delta;
+
+    // Лазер работает непрерывно, пока зажата Z.
+    if (this.shotType === 'laser') {
+      this.updateLaser();
+      return;
+    }
+
     if (!this.fireKey.isDown || this.fireCooldown > 0) return;
 
     this.fireShot();
-    this.fireCooldown = FIRE_BASE_INTERVAL_MS - this.power * FIRE_INTERVAL_PER_POWER_MS;
+    // Ракеты стреляют медленнее обычного выстрела.
+    this.fireCooldown =
+      this.shotType === 'rocket'
+        ? ROCKET_FIRE_INTERVAL_MS - this.power * ROCKET_FIRE_INTERVAL_PER_POWER_MS
+        : FIRE_BASE_INTERVAL_MS - this.power * FIRE_INTERVAL_PER_POWER_MS;
   }
 
-  /** Выстрел: количество пуль и разлёт зависят от силы. */
+  /** Выстрел по выбранному типу; до выбора — базовый. */
   private fireShot(): void {
+    switch (this.shotType) {
+      case 'homing':
+        this.fireHoming();
+        break;
+      case 'rocket':
+        this.fireRocket();
+        break;
+      default:
+        this.fireBasic();
+    }
+  }
+
+  /** Базовый выстрел: веер пуль, растёт с силой. */
+  private fireBasic(): void {
     const tier = getShotTier(this.power);
     const count = SHOT_BULLETS[tier];
     const halfSpread = SHOT_SPREAD_DEG[tier];
@@ -237,11 +296,59 @@ export class GameScene extends Phaser.Scene {
       // Угол пули: равномерно от -halfSpread до +halfSpread.
       const angleDeg = count === 1 ? 0 : -halfSpread + (i * 2 * halfSpread) / (count - 1);
       const rad = Phaser.Math.DegToRad(angleDeg);
-      this.spawnPlayerBullet(Math.sin(rad) * speed, -Math.cos(rad) * speed);
+      this.spawnPlayerBullet(Math.sin(rad) * speed, -Math.cos(rad) * speed, 'basic');
     }
   }
 
-  private spawnPlayerBullet(vx: number, vy: number): void {
+  /** Самонаводка: пули поворачивают к врагу, когда он рядом. */
+  private fireHoming(): void {
+    const tier = getShotTier(this.power);
+    const count = 1 + tier;
+    const speed = HOMING_BULLET_SPEED + this.power * BULLET_SPEED_PER_POWER;
+
+    for (let i = 0; i < count; i++) {
+      const spread = (i - (count - 1) / 2) * 6;
+      const rad = Phaser.Math.DegToRad(spread);
+      this.spawnPlayerBullet(Math.sin(rad) * speed, -Math.cos(rad) * speed, 'homing');
+    }
+  }
+
+  /** Ракеты: летят вперёд, при попадании взрываются по площади. */
+  private fireRocket(): void {
+    const tier = getShotTier(this.power);
+    const count = 1 + tier;
+    const speed = ROCKET_BASE_SPEED + this.power * BULLET_SPEED_PER_POWER;
+
+    for (let i = 0; i < count; i++) {
+      const spread = (i - (count - 1) / 2) * 5;
+      const rad = Phaser.Math.DegToRad(spread);
+      this.spawnPlayerBullet(Math.sin(rad) * speed, -Math.cos(rad) * speed, 'rocket');
+    }
+  }
+
+  /** Лазер: веер лучей от носа игрока до верха экрана. */
+  private updateLaser(): void {
+    this.laserGraphics.clear();
+    this.laserSegments = [];
+    if (!this.fireKey.isDown) return;
+
+    const tier = getShotTier(this.power);
+    const count = tier;
+    const halfSpread = Phaser.Math.DegToRad(LASER_SPREAD_DEG);
+    const nx = this.player.x;
+    const ny = this.player.y - PLAYER_HEIGHT / 2;
+
+    this.laserGraphics.lineStyle(LASER_BASE_WIDTH, 0xffffff, 0.85);
+    for (let i = 0; i < count; i++) {
+      const angle = count === 1 ? 0 : -halfSpread + (i * 2 * halfSpread) / (count - 1);
+      const length = ny / Math.cos(angle);
+      const endX = nx + Math.sin(angle) * length;
+      this.laserGraphics.lineBetween(nx, ny, endX, 0);
+      this.laserSegments.push({ ax: nx, ay: ny, bx: endX, by: 0 });
+    }
+  }
+
+  private spawnPlayerBullet(vx: number, vy: number, kind: BulletKind = 'basic'): void {
     const bullet = this.add.rectangle(
       this.player.x,
       this.player.y - PLAYER_HEIGHT / 2 - BULLET_HEIGHT / 2,
@@ -252,6 +359,7 @@ export class GameScene extends Phaser.Scene {
 
     bullet.setData('vx', vx);
     bullet.setData('vy', vy);
+    bullet.setData('kind', kind);
 
     this.playerBullets.add(bullet);
   }
@@ -260,6 +368,10 @@ export class GameScene extends Phaser.Scene {
     // Копия массива: внутри цикла пули могут уничтожаться.
     for (const child of [...this.playerBullets.getChildren()]) {
       const bullet = child as Phaser.GameObjects.Rectangle;
+      const kind = bullet.getData('kind') as BulletKind;
+
+      if (kind === 'homing') this.steerHomingBullet(bullet, seconds);
+
       bullet.x += (bullet.getData('vx') as number) * seconds;
       bullet.y += (bullet.getData('vy') as number) * seconds;
 
@@ -271,6 +383,36 @@ export class GameScene extends Phaser.Scene {
         bullet.destroy();
       }
     }
+  }
+
+  /** Самонаводка: пуля летит прямо и поворачивает, только если враг рядом. */
+  private steerHomingBullet(bullet: Phaser.GameObjects.Rectangle, seconds: number): void {
+    let target: Phaser.GameObjects.Shape | null = null;
+    let bestDist = Infinity;
+    for (const enemyChild of this.enemies.getChildren()) {
+      const enemy = enemyChild as Phaser.GameObjects.Shape;
+      const d = Phaser.Math.Distance.Between(bullet.x, bullet.y, enemy.x, enemy.y);
+      if (d < bestDist) {
+        bestDist = d;
+        target = enemy;
+      }
+    }
+    if (!target || bestDist > HOMING_ACTIVATE_RADIUS) return;
+
+    const vx = bullet.getData('vx') as number;
+    const vy = bullet.getData('vy') as number;
+    const speed = Math.hypot(vx, vy);
+    const currentAngle = Math.atan2(vy, vx);
+    const desiredAngle = Math.atan2(target.y - bullet.y, target.x - bullet.x);
+
+    let diff = desiredAngle - currentAngle;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+
+    const maxTurn = HOMING_TURN_RATE * seconds;
+    const newAngle = currentAngle + Phaser.Math.Clamp(diff, -maxTurn, maxTurn);
+    bullet.setData('vx', Math.cos(newAngle) * speed);
+    bullet.setData('vy', Math.sin(newAngle) * speed);
   }
 
   // ── Появление врагов ───────────────────────────────────
@@ -307,6 +449,7 @@ export class GameScene extends Phaser.Scene {
     enemy.setData('type', isShooter ? 'shooter' : 'flyer');
     enemy.setData('speed', isShooter ? ENEMY_SHOOTER_SPEED : ENEMY_SPEED);
     enemy.setData('shootTimer', ENEMY_SHOOT_INTERVAL_MS);
+    enemy.setData('hp', ENEMY_HP);
 
     this.enemies.add(enemy);
   }
@@ -441,10 +584,40 @@ export class GameScene extends Phaser.Scene {
 
   // ── Столкновения ───────────────────────────────────────
 
-  private checkCollisions(): void {
+  private checkCollisions(seconds: number): void {
+    // Лазер бьёт врагов непрерывно.
+    if (this.shotType === 'laser') {
+      this.laserHitsEnemies(seconds);
+    }
+
     // Пули игрока против врагов.
     for (const bulletChild of [...this.playerBullets.getChildren()]) {
       const bullet = bulletChild as Phaser.GameObjects.Rectangle;
+      const kind = bullet.getData('kind') as BulletKind;
+
+      // Ракета: при попадании взрывается и бьёт всех врагов рядом.
+      if (kind === 'rocket') {
+        for (const enemyChild of this.enemies.getChildren()) {
+          const enemy = enemyChild as Phaser.GameObjects.Shape;
+          if (
+            this.rectsOverlap(
+              bullet.x,
+              bullet.y,
+              BULLET_WIDTH,
+              BULLET_HEIGHT,
+              enemy.x,
+              enemy.y,
+              ENEMY_SIZE,
+              ENEMY_SIZE,
+            )
+          ) {
+            this.explodeRocket(bullet.x, bullet.y);
+            bullet.destroy();
+            break;
+          }
+        }
+        continue;
+      }
 
       for (const enemyChild of this.enemies.getChildren()) {
         const enemy = enemyChild as Phaser.GameObjects.Shape;
@@ -462,11 +635,8 @@ export class GameScene extends Phaser.Scene {
           )
         ) {
           bullet.destroy();
-          this.dropItems(enemy);
-          enemy.destroy();
-          this.score += SCORE_PER_ENEMY;
-          this.updateHud();
-          break; // одна пуля — один враг
+          this.damageEnemy(enemy, BULLET_DAMAGE);
+          break; // одна пуля — одно попадание
         }
       }
     }
@@ -494,6 +664,54 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private laserHitsEnemies(seconds: number): void {
+    for (const seg of this.laserSegments) {
+      for (const enemyChild of [...this.enemies.getChildren()]) {
+        const enemy = enemyChild as Phaser.GameObjects.Shape;
+        const d = this.distanceToSegment(seg.ax, seg.ay, seg.bx, seg.by, enemy.x, enemy.y);
+        if (d < LASER_BASE_WIDTH / 2 + ENEMY_SIZE / 2) {
+          this.damageEnemy(enemy, LASER_DPS * seconds);
+        }
+      }
+    }
+  }
+
+  /** Урон врагу; при нуле здоровья — дроп предметов, очки, уничтожение. */
+  private damageEnemy(enemy: Phaser.GameObjects.Shape, damage: number): void {
+    const hp = (enemy.getData('hp') as number) - damage;
+    if (hp > 0) {
+      enemy.setData('hp', hp);
+      // Визуально враг тускнеет по мере потери здоровья.
+      enemy.setAlpha(0.35 + 0.65 * (hp / ENEMY_HP));
+      return;
+    }
+
+    this.dropItems(enemy);
+    enemy.destroy();
+    this.score += SCORE_PER_ENEMY;
+    this.updateHud();
+  }
+
+  /** Взрыв ракеты: урон всем врагам в радиусе + вспышка. */
+  private explodeRocket(x: number, y: number): void {
+    for (const enemyChild of [...this.enemies.getChildren()]) {
+      const enemy = enemyChild as Phaser.GameObjects.Shape;
+      const d = Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y);
+      if (d <= ROCKET_EXPLOSION_RADIUS + ENEMY_SIZE / 2) {
+        this.damageEnemy(enemy, ROCKET_DAMAGE);
+      }
+    }
+
+    const flash = this.add.circle(x, y, ROCKET_EXPLOSION_RADIUS, 0xffa94d, 0.6);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      scale: 1.4,
+      duration: 250,
+      onComplete: () => flash.destroy(),
+    });
+  }
+
   private overlapsPlayerHitbox(x: number, y: number, width: number, height: number): boolean {
     return this.rectsOverlap(
       this.player.x,
@@ -518,6 +736,91 @@ export class GameScene extends Phaser.Scene {
     bh: number,
   ): boolean {
     return Math.abs(ax - bx) * 2 < aw + bw && Math.abs(ay - by) * 2 < ah + bh;
+  }
+
+  /** Расстояние от точки до отрезка (для проверки попадания лазера). */
+  private distanceToSegment(
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+    px: number,
+    py: number,
+  ): number {
+    const abx = bx - ax;
+    const aby = by - ay;
+    const len2 = abx * abx + aby * aby;
+    let t = len2 === 0 ? 0 : ((px - ax) * abx + (py - ay) * aby) / len2;
+    t = Phaser.Math.Clamp(t, 0, 1);
+    const cx = ax + abx * t;
+    const cy = ay + aby * t;
+    return Math.hypot(px - cx, py - cy);
+  }
+
+  // ── Выбор типа стрельбы ────────────────────────────────
+
+  private checkShotSelection(): void {
+    if (this.choosingShot || this.shotType !== null) return;
+    if (this.power < SHOT_SELECT_POWER) return;
+    this.startShotSelection();
+  }
+
+  /** Пауза геймплея и меню выбора типа стрельбы. */
+  private startShotSelection(): void {
+    this.choosingShot = true;
+    this.playerBullets.clear(true, true);
+    this.enemies.clear(true, true);
+    this.enemyBullets.clear(true, true);
+    this.items.clear(true, true);
+    this.laserGraphics.clear();
+    this.laserSegments = [];
+
+    const { width, height } = this.scale;
+
+    const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.8);
+    const title = this.add
+      .text(width / 2, height / 2 - 120, 'ВЫБЕРИ ТИП СТРЕЛЬБЫ', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '40px',
+        color: '#ffffff',
+      })
+      .setOrigin(0.5);
+    const optHoming = this.add
+      .text(width / 2, height / 2 - 40, '1 — Самонаводка', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '26px',
+        color: '#4ade80',
+      })
+      .setOrigin(0.5);
+    const optLaser = this.add
+      .text(width / 2, height / 2 + 10, '2 — Лазеры', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '26px',
+        color: '#f472b6',
+      })
+      .setOrigin(0.5);
+    const optRocket = this.add
+      .text(width / 2, height / 2 + 60, '3 — Ракеты', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '26px',
+        color: '#facc15',
+      })
+      .setOrigin(0.5);
+
+    this.shotMenuObjects = [overlay, title, optHoming, optLaser, optRocket];
+
+    if (!this.input.keyboard) return;
+    this.input.keyboard.once('keydown-ONE', () => this.chooseShot('homing'));
+    this.input.keyboard.once('keydown-TWO', () => this.chooseShot('laser'));
+    this.input.keyboard.once('keydown-THREE', () => this.chooseShot('rocket'));
+  }
+
+  private chooseShot(type: ShotType): void {
+    if (!this.choosingShot) return;
+    this.shotType = type;
+    this.choosingShot = false;
+    for (const obj of this.shotMenuObjects) obj.destroy();
+    this.shotMenuObjects = [];
   }
 
   // ── Жизни и конец игры ─────────────────────────────────
@@ -556,6 +859,8 @@ export class GameScene extends Phaser.Scene {
     this.enemies.clear(true, true);
     this.enemyBullets.clear(true, true);
     this.items.clear(true, true);
+    this.laserGraphics.clear();
+    this.laserSegments = [];
 
     const { width, height } = this.scale;
 
