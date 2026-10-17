@@ -26,7 +26,7 @@ const SHOT_SPREAD_DEG = [0, 4, 8, 12, 16];
 // Урон: пули и ракеты бьют по одному попаданию, лазер — постепенно.
 const BULLET_DAMAGE = 50;
 const ROCKET_DAMAGE = 60;
-const LASER_DPS = 60;
+const LASER_DPS = 100;
 
 // ── Враги ───────────────────────────────────────────────
 const ENEMY_SIZE = 32;
