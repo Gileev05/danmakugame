@@ -81,6 +81,23 @@ type ItemType = 'score' | 'power';
 type ShotType = 'homing' | 'laser' | 'rocket';
 type BulletKind = 'basic' | 'homing' | 'rocket';
 
+// ── Меню выбора типа стрельбы ───────────────────────────
+const SHOT_TYPES: ShotType[] = ['homing', 'laser', 'rocket'];
+const SHOT_NAMES: Record<ShotType, string> = {
+  homing: 'Самонаводка',
+  laser: 'Лазеры',
+  rocket: 'Ракеты',
+};
+const SHOT_COLORS: Record<ShotType, number> = {
+  homing: 0x4ade80,
+  laser: 0xf472b6,
+  rocket: 0xfacc15,
+};
+const SHOT_MENU_ICON_X = -110; // иконка слева от центра экрана
+const SHOT_MENU_LABEL_X = -70; // надпись рядом с иконкой
+const SHOT_MENU_START_Y = -60; // первая строка меню от центра
+const SHOT_MENU_STEP_Y = 70; // шаг между строками
+
 /** Уровень стрельбы по силе: 0.00–0.99 → 0, ..., 4.00 → 4. */
 function getShotTier(power: number): number {
   if (power >= POWER_MAX) return 4;
@@ -98,7 +115,7 @@ function getShotTier(power: number): number {
  * С врагов падают предметы: очки счёта (бонус к счёту) и очки силы
  * (усиливают стрельбу от 0.00 до 4.00).
  * При силе 1.00 игра останавливается и игрок выбирает тип стрельбы:
- * 1 — самонаводка, 2 — лазеры, 3 — ракеты.
+ * ↑ ↓ — выбор, Z — подтверждение: самонаводка, лазеры или ракеты.
  * 3 жизни. Когда они заканчиваются — экран счёта и рестарт по R / Enter.
  */
 export class GameScene extends Phaser.Scene {
@@ -123,6 +140,14 @@ export class GameScene extends Phaser.Scene {
   private shotType: ShotType | null = null;
   private choosingShot = false;
   private shotMenuObjects: Phaser.GameObjects.GameObject[] = [];
+  private shotMenuIndex = 0;
+  private shotMenuTexts: Phaser.GameObjects.Text[] = [];
+  private shotMenuIcons: Phaser.GameObjects.Graphics[] = [];
+  private shotMenuMarker!: Phaser.GameObjects.Text;
+  // Состояние клавиш в меню: чтобы срабатывало только новое нажатие.
+  private shotMenuUpWasDown = false;
+  private shotMenuDownWasDown = false;
+  private shotMenuZWasDown = false;
   private gameOver = false;
   private fireCooldown = 0;
   private enemySpawnCooldown = 0;
@@ -140,6 +165,9 @@ export class GameScene extends Phaser.Scene {
     this.shotType = null;
     this.choosingShot = false;
     this.shotMenuObjects = [];
+    this.shotMenuIndex = 0;
+    this.shotMenuTexts = [];
+    this.shotMenuIcons = [];
     this.gameOver = false;
     this.fireCooldown = 0;
     this.enemySpawnCooldown = 0;
@@ -195,7 +223,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    if (this.gameOver || this.choosingShot) return;
+    if (this.gameOver) return;
+
+    // Во время выбора типа стрельбы геймплей стоит на паузе.
+    if (this.choosingShot) {
+      this.updateShotSelection();
+      return;
+    }
 
     const seconds = delta / 1000;
 
@@ -768,6 +802,13 @@ export class GameScene extends Phaser.Scene {
   /** Пауза геймплея и меню выбора типа стрельбы. */
   private startShotSelection(): void {
     this.choosingShot = true;
+    this.shotMenuIndex = 0;
+    this.shotMenuTexts = [];
+    this.shotMenuIcons = [];
+    // Клавиши, зажатые до открытия меню, не должны сразу сработать.
+    this.shotMenuUpWasDown = this.cursors.up.isDown;
+    this.shotMenuDownWasDown = this.cursors.down.isDown;
+    this.shotMenuZWasDown = this.fireKey.isDown;
     this.playerBullets.clear(true, true);
     this.enemies.clear(true, true);
     this.enemyBullets.clear(true, true);
@@ -776,43 +817,137 @@ export class GameScene extends Phaser.Scene {
     this.laserSegments = [];
 
     const { width, height } = this.scale;
+    const centerX = width / 2;
+    const startY = height / 2 + SHOT_MENU_START_Y;
 
     const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.8);
     const title = this.add
-      .text(width / 2, height / 2 - 120, 'ВЫБЕРИ ТИП СТРЕЛЬБЫ', {
+      .text(width / 2, height / 2 - 150, 'ВЫБЕРИ ТИП СТРЕЛЬБЫ', {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '40px',
         color: '#ffffff',
       })
       .setOrigin(0.5);
-    const optHoming = this.add
-      .text(width / 2, height / 2 - 40, '1 — Самонаводка', {
+
+    // Каждый тип: иконка слева и надпись рядом.
+    for (let i = 0; i < SHOT_TYPES.length; i++) {
+      const type = SHOT_TYPES[i];
+      const y = startY + i * SHOT_MENU_STEP_Y;
+      this.shotMenuIcons.push(this.createShotIcon(type, centerX + SHOT_MENU_ICON_X, y));
+      this.shotMenuTexts.push(
+        this.add
+          .text(centerX + SHOT_MENU_LABEL_X, y, SHOT_NAMES[type], {
+            fontFamily: 'system-ui, sans-serif',
+            fontSize: '26px',
+            color: '#ffffff',
+          })
+          .setOrigin(0, 0.5),
+      );
+    }
+
+    // Маркер текущего выбора.
+    this.shotMenuMarker = this.add
+      .text(0, 0, '▶', {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '26px',
-        color: '#4ade80',
-      })
-      .setOrigin(0.5);
-    const optLaser = this.add
-      .text(width / 2, height / 2 + 10, '2 — Лазеры', {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '26px',
-        color: '#f472b6',
-      })
-      .setOrigin(0.5);
-    const optRocket = this.add
-      .text(width / 2, height / 2 + 60, '3 — Ракеты', {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '26px',
-        color: '#facc15',
+        color: '#ffffff',
       })
       .setOrigin(0.5);
 
-    this.shotMenuObjects = [overlay, title, optHoming, optLaser, optRocket];
+    // Подсказка управления на время выбора.
+    const hint = this.add
+      .text(width / 2, height - 40, '↑ ↓ — выбор, Z — подтвердить', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '18px',
+        color: '#94a3b8',
+      })
+      .setOrigin(0.5)
+      .setAlpha(0.8);
 
-    if (!this.input.keyboard) return;
-    this.input.keyboard.once('keydown-ONE', () => this.chooseShot('homing'));
-    this.input.keyboard.once('keydown-TWO', () => this.chooseShot('laser'));
-    this.input.keyboard.once('keydown-THREE', () => this.chooseShot('rocket'));
+    this.shotMenuObjects = [
+      overlay,
+      title,
+      ...this.shotMenuIcons,
+      ...this.shotMenuTexts,
+      this.shotMenuMarker,
+      hint,
+    ];
+
+    this.highlightShotOption();
+  }
+
+  /** Иконка типа стрельбы: рисуется примитивами, без файлов-картинок. */
+  private createShotIcon(type: ShotType, x: number, y: number): Phaser.GameObjects.Graphics {
+    const icon = this.add.graphics();
+    const color = SHOT_COLORS[type];
+
+    switch (type) {
+      case 'homing':
+        // Пуля с изогнутым хвостом — самонаводка.
+        icon.fillStyle(color, 1);
+        icon.fillCircle(x, y, 7);
+        icon.lineStyle(2, 0xffffff, 0.85);
+        icon.lineBetween(x - 2, y - 6, x - 8, y - 2);
+        icon.lineBetween(x - 8, y - 2, x - 10, y + 4);
+        break;
+      case 'laser':
+        // Вертикальный луч.
+        icon.lineStyle(4, color, 0.9);
+        icon.lineBetween(x, y - 14, x, y + 14);
+        break;
+      case 'rocket':
+        // Корпус с носом и хвостовым пламенем.
+        icon.fillStyle(color, 1);
+        icon.fillRect(x - 4, y - 4, 8, 12);
+        icon.fillTriangle(x - 4, y - 4, x + 4, y - 4, x, y - 14);
+        icon.fillStyle(0xffa94d, 1);
+        icon.fillTriangle(x - 3, y + 8, x + 3, y + 8, x, y + 16);
+        break;
+    }
+
+    return icon;
+  }
+
+  /** Управление меню: ↑ ↓ — выбор, Z — подтвердить. */
+  private updateShotSelection(): void {
+    const up = this.cursors.up.isDown;
+    const down = this.cursors.down.isDown;
+    const z = this.fireKey.isDown;
+
+    // Срабатываем только на новое нажатие, а не на удержание.
+    if (up && !this.shotMenuUpWasDown) {
+      this.shotMenuIndex = (this.shotMenuIndex - 1 + SHOT_TYPES.length) % SHOT_TYPES.length;
+      this.highlightShotOption();
+    }
+    if (down && !this.shotMenuDownWasDown) {
+      this.shotMenuIndex = (this.shotMenuIndex + 1) % SHOT_TYPES.length;
+      this.highlightShotOption();
+    }
+    if (z && !this.shotMenuZWasDown) {
+      this.chooseShot(SHOT_TYPES[this.shotMenuIndex]);
+    }
+
+    this.shotMenuUpWasDown = up;
+    this.shotMenuDownWasDown = down;
+    this.shotMenuZWasDown = z;
+  }
+
+  /** Подсветка выбранной строки меню. */
+  private highlightShotOption(): void {
+    const startY = this.scale.height / 2 + SHOT_MENU_START_Y;
+    this.shotMenuMarker.setPosition(
+      this.scale.width / 2 + SHOT_MENU_ICON_X - 24,
+      startY + this.shotMenuIndex * SHOT_MENU_STEP_Y,
+    );
+
+    for (let i = 0; i < SHOT_TYPES.length; i++) {
+      const selected = i === this.shotMenuIndex;
+      const type = SHOT_TYPES[i];
+      const color = selected ? `#${SHOT_COLORS[type].toString(16).padStart(6, '0')}` : '#94a3b8';
+      this.shotMenuTexts[i].setColor(color);
+      this.shotMenuTexts[i].setAlpha(selected ? 1 : 0.6);
+      this.shotMenuIcons[i].setAlpha(selected ? 1 : 0.5);
+    }
   }
 
   private chooseShot(type: ShotType): void {
