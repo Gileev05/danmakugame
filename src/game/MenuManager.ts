@@ -18,11 +18,11 @@ import {
 } from './constants';
 import { ShotType, Difficulty } from './types';
 
-/** Меню выбора типа стрельбы и усложнения: ↑ ↓ — выбор, Z — подтвердить. */
+/** Меню выбора типа стрельбы и усложнения: ↑ ↓ — выбор, Enter — подтвердить. */
 export class MenuManager {
   private scene: Phaser.Scene;
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys;
-  private fireKey: Phaser.Input.Keyboard.Key;
+  private enterKey: Phaser.Input.Keyboard.Key;
 
   private choosingShot = false;
   private shotMenuObjects: Phaser.GameObjects.GameObject[] = [];
@@ -32,7 +32,7 @@ export class MenuManager {
   private shotMenuMarker!: Phaser.GameObjects.Text;
   private shotMenuUpWasDown = false;
   private shotMenuDownWasDown = false;
-  private shotMenuZWasDown = false;
+  private shotMenuEnterWasDown = false;
   private onShotChosen: ((type: ShotType) => void) | null = null;
 
   private choosingDifficulty = false;
@@ -44,18 +44,18 @@ export class MenuManager {
   private difficultyMenuMarker!: Phaser.GameObjects.Text;
   private difficultyMenuUpWasDown = false;
   private difficultyMenuDownWasDown = false;
-  private difficultyMenuZWasDown = false;
+  private difficultyMenuEnterWasDown = false;
   private difficultyOptions: { diff: Difficulty; name: string; desc: string }[] = [];
   private onDifficultyChosen: ((diff: Difficulty) => void) | null = null;
 
   constructor(
     scene: Phaser.Scene,
     cursors: Phaser.Types.Input.Keyboard.CursorKeys,
-    fireKey: Phaser.Input.Keyboard.Key,
+    enterKey: Phaser.Input.Keyboard.Key,
   ) {
     this.scene = scene;
     this.cursors = cursors;
-    this.fireKey = fireKey;
+    this.enterKey = enterKey;
   }
 
   isChoosing(): boolean {
@@ -78,7 +78,7 @@ export class MenuManager {
     // Клавиши, зажатые до открытия меню, не должны сразу сработать.
     this.shotMenuUpWasDown = this.cursors.up.isDown;
     this.shotMenuDownWasDown = this.cursors.down.isDown;
-    this.shotMenuZWasDown = this.fireKey.isDown;
+    this.shotMenuEnterWasDown = this.enterKey.isDown;
 
     const { width, height } = this.scene.scale;
     const centerX = width / 2;
@@ -127,7 +127,7 @@ export class MenuManager {
 
     // Подсказка управления на время выбора.
     const hint = this.scene.add
-      .text(width / 2, height - 40, '↑ ↓ — выбор, Z — подтвердить', {
+      .text(width / 2, height - 40, '↑ ↓ — выбор, Enter — подтвердить', {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '18px',
         color: '#94a3b8',
@@ -180,11 +180,11 @@ export class MenuManager {
     return icon;
   }
 
-  /** Управление меню: ↑ ↓ — выбор, Z — подтвердить. */
+  /** Управление меню: ↑ ↓ — выбор, Enter — подтвердить. */
   private updateShotSelection(): void {
     const up = this.cursors.up.isDown;
     const down = this.cursors.down.isDown;
-    const z = this.fireKey.isDown;
+    const enter = this.enterKey.isDown;
 
     // Срабатываем только на новое нажатие, а не на удержание.
     if (up && !this.shotMenuUpWasDown) {
@@ -195,13 +195,13 @@ export class MenuManager {
       this.shotMenuIndex = (this.shotMenuIndex + 1) % SHOT_TYPES.length;
       this.highlightShotOption();
     }
-    if (z && !this.shotMenuZWasDown) {
+    if (enter && !this.shotMenuEnterWasDown) {
       this.chooseShot(SHOT_TYPES[this.shotMenuIndex]);
     }
 
     this.shotMenuUpWasDown = up;
     this.shotMenuDownWasDown = down;
-    this.shotMenuZWasDown = z;
+    this.shotMenuEnterWasDown = enter;
   }
 
   /** Подсветка выбранной строки меню. */
@@ -246,7 +246,7 @@ export class MenuManager {
     // Клавиши, зажатые до открытия меню, не должны сразу сработать.
     this.difficultyMenuUpWasDown = this.cursors.up.isDown;
     this.difficultyMenuDownWasDown = this.cursors.down.isDown;
-    this.difficultyMenuZWasDown = this.fireKey.isDown;
+    this.difficultyMenuEnterWasDown = this.enterKey.isDown;
 
     const { width, height } = this.scene.scale;
     const centerX = width / 2;
@@ -297,7 +297,7 @@ export class MenuManager {
       .setOrigin(0.5);
 
     const hint = this.scene.add
-      .text(width / 2, height - 40, '↑ ↓ — выбор, Z — подтвердить', {
+      .text(width / 2, height - 40, '↑ ↓ — выбор, Enter — подтвердить', {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '18px',
         color: '#94a3b8',
@@ -353,11 +353,11 @@ export class MenuManager {
     return icon;
   }
 
-  /** Управление меню усложнения: ↑ ↓ — выбор, Z — подтвердить. */
+  /** Управление меню усложнения: ↑ ↓ — выбор, Enter — подтвердить. */
   private updateDifficultySelection(): void {
     const up = this.cursors.up.isDown;
     const down = this.cursors.down.isDown;
-    const z = this.fireKey.isDown;
+    const enter = this.enterKey.isDown;
 
     if (up && !this.difficultyMenuUpWasDown) {
       this.difficultyMenuIndex =
@@ -369,13 +369,13 @@ export class MenuManager {
       this.difficultyMenuIndex = (this.difficultyMenuIndex + 1) % this.difficultyOptions.length;
       this.highlightDifficultyOption();
     }
-    if (z && !this.difficultyMenuZWasDown) {
+    if (enter && !this.difficultyMenuEnterWasDown) {
       this.chooseDifficulty(this.difficultyOptions[this.difficultyMenuIndex].diff);
     }
 
     this.difficultyMenuUpWasDown = up;
     this.difficultyMenuDownWasDown = down;
-    this.difficultyMenuZWasDown = z;
+    this.difficultyMenuEnterWasDown = enter;
   }
 
   /** Подсветка выбранной строки меню усложнения. */

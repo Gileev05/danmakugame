@@ -68,13 +68,13 @@ export class ItemManager {
   }
 
   /** Враг роняет 3–5 предметов, разлетающихся как при взрыве. */
-  dropItems(x: number, y: number, allowPower: boolean): void {
+  dropItems(x: number, y: number): void {
     const count = Phaser.Math.Between(3, 5);
     for (let i = 0; i < count; i++) {
-      // В фазе 1 очки силы не выпадают.
-      const isPower =
-        allowPower && (i === 0 || Phaser.Math.Between(1, 100) <= ITEM_POWER_CHANCE_PERCENT);
-      this.spawnItem(x, y, isPower ? 'power' : 'score');
+      // Первый предмет всегда очко силы, остальные — случайно.
+      const type: ItemType =
+        i === 0 || Phaser.Math.Between(1, 100) <= ITEM_POWER_CHANCE_PERCENT ? 'power' : 'score';
+      this.spawnItem(x, y, type);
     }
   }
 

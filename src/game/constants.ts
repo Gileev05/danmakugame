@@ -98,7 +98,7 @@ export const HEXAGON_EDGE_COLOR = 0xea580c;
 export const SPLIT_ENEMY_SIZE = 20; // размер маленьких треугольников
 export const SPLIT_HP_DIVISOR = 1.5; // их HP в 1.5 раза меньше
 export const SPLIT_UP_SPEED = 120; // сначала отлетают вверх
-export const SPLIT_UP_TIME_MS = 400; // сколько летят вверх
+export const SPLIT_UP_TIME_MS = 200; // сколько летят вверх
 
 // ── Усложнение «Зависание ромбов» ───────────────────────
 export const HOVER_Y_MIN = 200; // ромбы зависают ниже шестиугольников
@@ -106,9 +106,7 @@ export const HOVER_Y_MAX = 260;
 export const HOVER_DESCEND_SPEED = 60;
 
 // ── Фазы ────────────────────────────────────────────────
-export const PHASE_1_DURATION_MS = 60000; // фаза 1 длится 60 секунд
-export const PHASE_1_SHOOTER_START_MS = 30000; // ромбы появляются с 30-й секунды
-export const SPAWN_RATE_MIN = 0.25; // минимум спавнрейта в начале фазы 1
+export const SPAWN_RATE_MIN = 0.5; // спавнрейт при силе 0.00 (до 100% при силе 4.00)
 
 // ── Сложность ───────────────────────────────────────────
 export const DIFFICULTY_PER_POWER = 0.5; // множитель сложности
