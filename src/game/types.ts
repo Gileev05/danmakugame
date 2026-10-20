@@ -1,6 +1,6 @@
 /** Общие типы игры. */
 
-export type EnemyType = 'flyer' | 'shooter' | 'hexagon';
+export type EnemyType = 'flyer' | 'shooter' | 'hexagon' | 'split';
 
 export type ItemType = 'score' | 'power';
 
@@ -10,4 +10,4 @@ export type BulletKind = 'basic' | 'homing' | 'rocket';
 
 export type ExplosionShape = 'plus' | 'x';
 
-export type Difficulty = 'hexagon' | null;
+export type Difficulty = 'hexagon' | 'split' | 'hover' | null;

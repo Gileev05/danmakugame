@@ -32,6 +32,13 @@ import {
   HEXAGON_EXPLOSION_COLOR,
   HEXAGON_COLOR,
   HEXAGON_EDGE_COLOR,
+  SPLIT_ENEMY_SIZE,
+  SPLIT_HP_DIVISOR,
+  SPLIT_UP_SPEED,
+  SPLIT_UP_TIME_MS,
+  HOVER_Y_MIN,
+  HOVER_Y_MAX,
+  HOVER_DESCEND_SPEED,
   DIFFICULTY_PER_POWER,
 } from './constants';
 import { EnemyType, ExplosionShape, Difficulty } from './types';
@@ -43,7 +50,7 @@ export class EnemyManager {
   private enemies: Phaser.GameObjects.Group;
   private enemyBullets: Phaser.GameObjects.Group;
   private hexagonBullets: Phaser.GameObjects.Group;
-  private difficulty: Difficulty = null;
+  private difficulties: Set<Difficulty> = new Set();
   private enemySpawnCooldown = 0;
   private hexagonSpawnCooldown = 0;
 
@@ -67,13 +74,21 @@ export class EnemyManager {
     return this.hexagonBullets;
   }
 
-  setDifficulty(diff: Difficulty): void {
-    this.difficulty = diff;
+  /** Добавить активное усложнение (их может быть несколько). */
+  addDifficulty(diff: Difficulty): void {
+    if (diff !== null) this.difficulties.add(diff);
   }
 
-  /** Размер хитбокса врага: шестиугольник крупнее обычных врагов. */
+  hasDifficulty(diff: Difficulty): boolean {
+    return diff !== null && this.difficulties.has(diff);
+  }
+
+  /** Размер хитбокса врага: шестиугольник и маленькие треугольники отличаются. */
   getEnemySize(enemy: Phaser.GameObjects.Shape): number {
-    return enemy.getData('type') === 'hexagon' ? HEXAGON_SIZE : ENEMY_SIZE;
+    const type = enemy.getData('type') as EnemyType;
+    if (type === 'hexagon') return HEXAGON_SIZE;
+    if (type === 'split') return SPLIT_ENEMY_SIZE;
+    return ENEMY_SIZE;
   }
 
   update(delta: number, seconds: number, power: number): void {
@@ -129,6 +144,10 @@ export class EnemyManager {
     enemy.setData('type', isShooter ? 'shooter' : 'flyer');
     enemy.setData('speed', isShooter ? ENEMY_SHOOTER_SPEED : ENEMY_SPEED);
     enemy.setData('shootTimer', ENEMY_SHOOT_INTERVAL_MS);
+    // Усложнение «Зависание ромбов»: ромб остаётся в верхней части экрана.
+    if (isShooter && this.hasDifficulty('hover')) {
+      enemy.setData('hoverY', Phaser.Math.Between(HOVER_Y_MIN, HOVER_Y_MAX));
+    }
     const hp = Math.round(ENEMY_HP * this.getDifficultyMultiplier(power));
     enemy.setData('hp', hp);
     enemy.setData('maxHp', hp);
@@ -146,14 +165,28 @@ export class EnemyManager {
         this.updateHexagon(enemy, seconds);
         continue;
       }
-
-      enemy.y += (enemy.getData('speed') as number) * seconds;
-
+  
+      // Маленький треугольник: сначала отлетает вверх, затем падает.
+      if (type === 'split') {
+        this.updateSplitTriangle(enemy, seconds);
+        continue;
+      }
+  
+      // Обычные враги летят вниз; ромбы с hoverY зависают вверху.
+      const hoverY = enemy.getData('hoverY') as number | undefined;
+      if (hoverY !== undefined) {
+        if (enemy.y < hoverY) {
+          enemy.y = Math.min(hoverY, enemy.y + HOVER_DESCEND_SPEED * seconds);
+        }
+      } else {
+        enemy.y += (enemy.getData('speed') as number) * seconds;
+      }
+  
       if (enemy.y - ENEMY_SIZE / 2 > this.scene.scale.height) {
         enemy.destroy();
         continue;
       }
-
+  
       if (type !== 'shooter') continue;
 
       const timer = (enemy.getData('shootTimer') as number) - seconds * 1000;
@@ -163,6 +196,41 @@ export class EnemyManager {
       } else {
         enemy.setData('shootTimer', timer);
       }
+    }
+  }
+
+  /** Усложнение «Разделение треугольников»: из погибшего треугольника — 2 маленьких. */
+  spawnSplitTriangles(x: number, y: number, power: number): void {
+    if (!this.hasDifficulty('split')) return;
+    const half = SPLIT_ENEMY_SIZE / 2;
+    for (let i = 0; i < 2; i++) {
+      const offset = i === 0 ? -10 : 10;
+      const small = this.scene.add
+        .triangle(x + offset, y, -half, -half, half, -half, 0, half, ENEMY_COLOR)
+        .setStrokeStyle(2, ENEMY_EDGE_COLOR);
+
+      small.setData('type', 'split');
+      small.setData('splitTimer', SPLIT_UP_TIME_MS);
+      const hp = Math.round((ENEMY_HP * this.getDifficultyMultiplier(power)) / SPLIT_HP_DIVISOR);
+      small.setData('hp', hp);
+      small.setData('maxHp', hp);
+
+      this.enemies.add(small);
+    }
+  }
+
+  /** Маленький треугольник: сначала вверх, затем падает как обычный. */
+  private updateSplitTriangle(enemy: Phaser.GameObjects.Shape, seconds: number): void {
+    const timer = (enemy.getData('splitTimer') as number) - seconds * 1000;
+    if (timer > 0) {
+      enemy.setData('splitTimer', timer);
+      enemy.y -= SPLIT_UP_SPEED * seconds;
+    } else {
+      enemy.y += ENEMY_SPEED * seconds;
+    }
+
+    if (enemy.y - SPLIT_ENEMY_SIZE / 2 > this.scene.scale.height) {
+      enemy.destroy();
     }
   }
 
@@ -206,7 +274,7 @@ export class EnemyManager {
   // ── Шестиугольник (усложнение) ─────────────────────────
 
   private handleHexagonSpawning(delta: number, power: number): void {
-    if (this.difficulty !== 'hexagon') return;
+    if (!this.hasDifficulty('hexagon')) return;
     this.hexagonSpawnCooldown -= delta;
     if (this.hexagonSpawnCooldown > 0) return;
     this.spawnHexagon(power);

@@ -94,8 +94,19 @@ export const HEXAGON_EXPLOSION_COLOR = 0xfdba74;
 export const HEXAGON_COLOR = 0xf97316;
 export const HEXAGON_EDGE_COLOR = 0xea580c;
 
+// ── Усложнение «Разделение треугольников» ───────────────
+export const SPLIT_ENEMY_SIZE = 20; // размер маленьких треугольников
+export const SPLIT_HP_DIVISOR = 1.5; // их HP в 1.5 раза меньше
+export const SPLIT_UP_SPEED = 120; // сначала отлетают вверх
+export const SPLIT_UP_TIME_MS = 400; // сколько летят вверх
+
+// ── Усложнение «Зависание ромбов» ───────────────────────
+export const HOVER_Y_MIN = 200; // ромбы зависают ниже шестиугольников
+export const HOVER_Y_MAX = 260;
+export const HOVER_DESCEND_SPEED = 60;
+
 // ── Сложность ───────────────────────────────────────────
-export const DIFFICULTY_PER_POWER = 0.25; // множитель сложности: +25% за единицу силы
+export const DIFFICULTY_PER_POWER = 0.5; // множитель сложности
 
 // ── Меню выбора типа стрельбы ───────────────────────────
 export const SHOT_TYPES: ShotType[] = ['homing', 'laser', 'rocket'];
@@ -117,8 +128,16 @@ export const SHOT_MENU_STEP_Y = 70; // шаг между строками
 // ── Меню выбора усложнения ──────────────────────────────
 export const DIFFICULTY_OPTIONS: { diff: Difficulty; name: string; desc: string }[] = [
   { diff: 'hexagon', name: 'Шестиугольник', desc: 'Новый тип врагов' },
-  { diff: null, name: '???', desc: 'Скоро' },
-  { diff: null, name: '???', desc: 'Скоро' },
+  {
+    diff: 'split',
+    name: 'Усиление треугольников 1',
+    desc: 'Треугольники разделяются на 2 после смерти',
+  },
+  {
+    diff: 'hover',
+    name: 'Усиление ромбов 1',
+    desc: 'Ромбы больше не улетают с поля боя',
+  },
 ];
 export const DIFF_MENU_ICON_X = -110; // иконка слева от центра экрана
 export const DIFF_MENU_LABEL_X = -70; // надпись рядом с иконкой

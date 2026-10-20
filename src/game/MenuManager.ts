@@ -7,13 +7,14 @@ import {
   SHOT_MENU_LABEL_X,
   SHOT_MENU_START_Y,
   SHOT_MENU_STEP_Y,
-  DIFFICULTY_OPTIONS,
   DIFF_MENU_ICON_X,
   DIFF_MENU_LABEL_X,
   DIFF_MENU_START_Y,
   DIFF_MENU_STEP_Y,
   HEXAGON_COLOR,
   HEXAGON_EDGE_COLOR,
+  ENEMY_COLOR,
+  ENEMY_SHOOTER_COLOR,
 } from './constants';
 import { ShotType, Difficulty } from './types';
 
@@ -44,6 +45,7 @@ export class MenuManager {
   private difficultyMenuUpWasDown = false;
   private difficultyMenuDownWasDown = false;
   private difficultyMenuZWasDown = false;
+  private difficultyOptions: { diff: Difficulty; name: string; desc: string }[] = [];
   private onDifficultyChosen: ((diff: Difficulty) => void) | null = null;
 
   constructor(
@@ -222,7 +224,11 @@ export class MenuManager {
 
   // ── Меню выбора усложнения ─────────────────────────────
 
-  startDifficultySelection(onChosen: (diff: Difficulty) => void): void {
+  startDifficultySelection(
+    options: { diff: Difficulty; name: string; desc: string }[],
+    onChosen: (diff: Difficulty) => void,
+  ): void {
+    this.difficultyOptions = options;
     this.onDifficultyChosen = onChosen;
     this.choosingDifficulty = true;
     this.difficultyMenuIndex = 0;
@@ -248,10 +254,12 @@ export class MenuManager {
       .setOrigin(0.5);
 
     // Каждое усложнение: иконка, название и описание.
-    for (let i = 0; i < DIFFICULTY_OPTIONS.length; i++) {
-      const opt = DIFFICULTY_OPTIONS[i];
+    for (let i = 0; i < this.difficultyOptions.length; i++) {
+      const opt = this.difficultyOptions[i];
       const y = startY + i * DIFF_MENU_STEP_Y;
-      this.difficultyMenuIcons.push(this.createDifficultyIcon(i, centerX + DIFF_MENU_ICON_X, y));
+      this.difficultyMenuIcons.push(
+        this.createDifficultyIcon(opt.diff, centerX + DIFF_MENU_ICON_X, y),
+      );
       this.difficultyMenuTexts.push(
         this.scene.add
           .text(centerX + DIFF_MENU_LABEL_X, y - 12, opt.name, {
@@ -303,9 +311,9 @@ export class MenuManager {
   }
 
   /** Иконка усложнения: рисуется примитивами, без файлов-картинок. */
-  private createDifficultyIcon(index: number, x: number, y: number): Phaser.GameObjects.Graphics {
+  private createDifficultyIcon(diff: Difficulty, x: number, y: number): Phaser.GameObjects.Graphics {
     const icon = this.scene.add.graphics();
-    if (index === 0) {
+    if (diff === 'hexagon') {
       // Шестиугольник.
       const points: Phaser.Math.Vector2[] = [];
       for (let i = 0; i < 6; i++) {
@@ -316,10 +324,23 @@ export class MenuManager {
       icon.fillPoints(points, true);
       icon.lineStyle(2, HEXAGON_EDGE_COLOR, 1);
       icon.strokePoints(points, true);
+    } else if (diff === 'split') {
+      // Два маленьких треугольника — разделение.
+      icon.fillStyle(ENEMY_COLOR, 1);
+      icon.fillTriangle(x - 11, y - 6, x - 3, y - 6, x - 7, y + 8);
+      icon.fillTriangle(x + 3, y - 6, x + 11, y - 6, x + 7, y + 8);
     } else {
-      // Заглушка: серый круг.
-      icon.fillStyle(0x64748b, 1);
-      icon.fillCircle(x, y, 14);
+      // Ромб — зависание ромбов.
+      icon.fillStyle(ENEMY_SHOOTER_COLOR, 1);
+      icon.fillPoints(
+        [
+          new Phaser.Math.Vector2(x, y - 14),
+          new Phaser.Math.Vector2(x + 14, y),
+          new Phaser.Math.Vector2(x, y + 14),
+          new Phaser.Math.Vector2(x - 14, y),
+        ],
+        true,
+      );
     }
     return icon;
   }
@@ -332,15 +353,16 @@ export class MenuManager {
 
     if (up && !this.difficultyMenuUpWasDown) {
       this.difficultyMenuIndex =
-        (this.difficultyMenuIndex - 1 + DIFFICULTY_OPTIONS.length) % DIFFICULTY_OPTIONS.length;
+        (this.difficultyMenuIndex - 1 + this.difficultyOptions.length) %
+        this.difficultyOptions.length;
       this.highlightDifficultyOption();
     }
     if (down && !this.difficultyMenuDownWasDown) {
-      this.difficultyMenuIndex = (this.difficultyMenuIndex + 1) % DIFFICULTY_OPTIONS.length;
+      this.difficultyMenuIndex = (this.difficultyMenuIndex + 1) % this.difficultyOptions.length;
       this.highlightDifficultyOption();
     }
     if (z && !this.difficultyMenuZWasDown) {
-      this.chooseDifficulty(DIFFICULTY_OPTIONS[this.difficultyMenuIndex].diff);
+      this.chooseDifficulty(this.difficultyOptions[this.difficultyMenuIndex].diff);
     }
 
     this.difficultyMenuUpWasDown = up;
@@ -356,7 +378,7 @@ export class MenuManager {
       startY + this.difficultyMenuIndex * DIFF_MENU_STEP_Y,
     );
 
-    for (let i = 0; i < DIFFICULTY_OPTIONS.length; i++) {
+    for (let i = 0; i < this.difficultyOptions.length; i++) {
       const selected = i === this.difficultyMenuIndex;
       const color = selected ? '#ffffff' : '#94a3b8';
       this.difficultyMenuTexts[i].setColor(color);

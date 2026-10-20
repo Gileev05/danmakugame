@@ -22,21 +22,10 @@ import {
   POWER_PER_ITEM,
   SHOT_SELECT_POWER,
   ENEMY_BULLET_RADIUS,
+  DIFFICULTY_OPTIONS,
 } from './constants';
-import { ShotType, ItemType, BulletKind, Difficulty } from './types';
+import { ShotType, ItemType, BulletKind, EnemyType, Difficulty } from './types';
 
-/**
- * Danmaku-scroll shooter.
- *
- * Управление: стрелки — движение, Z — непрерывная стрельба вверх.
- * Враги появляются сверху: простые летят вниз, стрелки целятся в игрока.
- * С врагов падают предметы: очки счёта (бонус к счёту) и очки силы
- * (усиливают стрельбу от 0.00 до 4.00).
- * При силе 1.00 игра останавливается и игрок выбирает тип стрельбы:
- * ↑ ↓ — выбор, Z — подтверждение: самонаводка, лазеры или ракеты.
- * Затем выбирается усложнение (пока доступно одно — «Шестиугольник»).
- * 3 жизни. Когда они заканчиваются — экран счёта и рестарт по R / Enter.
- */
 export class GameScene extends Phaser.Scene {
   private player!: Player;
   private shotSystem!: ShotSystem;
@@ -53,7 +42,8 @@ export class GameScene extends Phaser.Scene {
   private score = 0;
   private power = 0;
   private shotType: ShotType | null = null;
-  private difficulty: Difficulty = null;
+  private difficultyPool: Difficulty[] = [];
+  private nextDifficultyPower = SHOT_SELECT_POWER;
   private gameOver = false;
   private respawnInvulnUntil = 0;
 
@@ -67,7 +57,10 @@ export class GameScene extends Phaser.Scene {
     this.score = 0;
     this.power = 0;
     this.shotType = null;
-    this.difficulty = null;
+    this.difficultyPool = DIFFICULTY_OPTIONS.map((o) => o.diff).filter(
+      (d): d is Difficulty => d !== null,
+    );
+    this.nextDifficultyPower = SHOT_SELECT_POWER;
     this.gameOver = false;
     this.respawnInvulnUntil = 0;
 
@@ -131,6 +124,7 @@ export class GameScene extends Phaser.Scene {
     this.enemyManager.update(delta, seconds, this.power);
     this.itemManager.update(seconds, (type) => this.collectItem(type));
     this.checkShotSelection();
+    this.checkDifficultySelection();
     this.checkCollisions(seconds);
     this.updateInvulnerability();
   }
@@ -154,12 +148,31 @@ export class GameScene extends Phaser.Scene {
     this.menuManager.startShotSelection((type) => {
       this.shotType = type;
       this.shotSystem.setType(type);
-      this.clearGameplayObjects();
-      this.menuManager.startDifficultySelection((diff) => {
-        this.difficulty = diff;
-        this.enemyManager.setDifficulty(diff);
-      });
+      this.startDifficultySelection();
     });
+  }
+
+  /** Выбор усложнения на каждую 1.00 силы из пула оставшихся. */
+  private checkDifficultySelection(): void {
+    if (this.menuManager.isChoosing()) return;
+    if (this.difficultyPool.length === 0) return;
+    if (this.power < this.nextDifficultyPower) return;
+    this.startDifficultySelection();
+  }
+
+  private startDifficultySelection(): void {
+    if (this.difficultyPool.length === 0) return;
+    this.clearGameplayObjects();
+    this.menuManager.startDifficultySelection(
+      DIFFICULTY_OPTIONS.filter((o) => o.diff !== null && this.difficultyPool.includes(o.diff)),
+      (diff) => {
+        if (diff !== null) {
+          this.difficultyPool = this.difficultyPool.filter((d) => d !== diff);
+          this.enemyManager.addDifficulty(diff);
+        }
+        this.nextDifficultyPower += 1.0;
+      },
+    );
   }
 
   private clearGameplayObjects(): void {
@@ -281,7 +294,17 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    this.itemManager.dropItems(enemy.x, enemy.y);
+    const enemyType = enemy.getData('type') as EnemyType;
+
+    // Усложнение «Разделение треугольников»: из погибшего треугольника — 2 маленьких.
+    if (enemyType === 'flyer' && this.enemyManager.hasDifficulty('split')) {
+      this.enemyManager.spawnSplitTriangles(enemy.x, enemy.y, this.power);
+    }
+
+    // Маленькие треугольники не роняют предметы.
+    if (enemyType !== 'split') {
+      this.itemManager.dropItems(enemy.x, enemy.y);
+    }
     enemy.destroy();
     this.score += SCORE_PER_ENEMY;
     this.updateHud();
