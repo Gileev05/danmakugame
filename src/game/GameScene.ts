@@ -23,6 +23,7 @@ import {
   SHOT_SELECT_POWER,
   ENEMY_BULLET_RADIUS,
   DIFFICULTY_OPTIONS,
+  PHASE_1_DURATION_MS,
 } from './constants';
 import { ShotType, ItemType, BulletKind, EnemyType, Difficulty } from './types';
 
@@ -44,6 +45,10 @@ export class GameScene extends Phaser.Scene {
   private shotType: ShotType | null = null;
   private difficultyPool: Difficulty[] = [];
   private nextDifficultyPower = SHOT_SELECT_POWER;
+  private phaseTime = 0;
+  private phase = 1;
+  private phaseText!: Phaser.GameObjects.Text;
+  private timerText!: Phaser.GameObjects.Text;
   private gameOver = false;
   private paused = false;
   private pauseOverlay: Phaser.GameObjects.GameObject[] = [];
@@ -65,6 +70,8 @@ export class GameScene extends Phaser.Scene {
       (d): d is Difficulty => d !== null,
     );
     this.nextDifficultyPower = SHOT_SELECT_POWER;
+    this.phaseTime = 0;
+    this.phase = 1;
     this.gameOver = false;
     this.paused = false;
     this.pauseOverlay = [];
@@ -102,7 +109,23 @@ export class GameScene extends Phaser.Scene {
       fontSize: '22px',
       color: '#facc15',
     });
+    // Фаза и таймер — в правом верхнем углу, под счётом.
+    this.phaseText = this.add
+      .text(width - 24, 52, '', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '22px',
+        color: '#facc15',
+      })
+      .setOrigin(1, 0);
+    this.timerText = this.add
+      .text(width - 24, 84, '', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '22px',
+        color: '#ffffff',
+      })
+      .setOrigin(1, 0);
     this.updateHud();
+    this.updatePhaseHud();
 
     // Подсказка по управлению — внизу экрана.
     this.add
@@ -135,9 +158,17 @@ export class GameScene extends Phaser.Scene {
 
     const seconds = delta / 1000;
 
+    // Таймер фазы идёт только во время активной игры (не на паузе и не в меню).
+    this.phaseTime += delta;
+    if (this.phase === 1 && this.phaseTime >= PHASE_1_DURATION_MS) {
+      this.phase = 2;
+      this.onPhase2Start();
+    }
+    this.updatePhaseHud();
+
     this.player.update(seconds);
     this.shotSystem.update(delta, seconds, this.power);
-    this.enemyManager.update(delta, seconds, this.power);
+    this.enemyManager.update(delta, seconds, this.power, this.phaseTime);
     this.itemManager.update(seconds, (type) => this.collectItem(type));
     this.checkShotSelection();
     this.checkDifficultySelection();
@@ -154,6 +185,20 @@ export class GameScene extends Phaser.Scene {
       this.power = Math.min(POWER_MAX, this.power + POWER_PER_ITEM);
     }
     this.updateHud();
+  }
+
+  /** Переход в фазу 2: игрок сразу получает силу 1.00. */
+  private onPhase2Start(): void {
+    this.power = Math.max(this.power, SHOT_SELECT_POWER);
+    this.updateHud();
+  }
+
+  private updatePhaseHud(): void {
+    this.phaseText.setText(`Фаза ${this.phase}`);
+    const totalSeconds = Math.floor(this.phaseTime / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    this.timerText.setText(`${minutes}:${seconds.toString().padStart(2, '0')}`);
   }
 
   private checkShotSelection(): void {
@@ -319,9 +364,9 @@ export class GameScene extends Phaser.Scene {
       this.enemyManager.spawnSplitTriangles(enemy.x, enemy.y, this.power);
     }
 
-    // Маленькие треугольники не роняют предметы.
+    // Маленькие треугольники не роняют предметы; в фазе 1 нет очков силы.
     if (enemyType !== 'split') {
-      this.itemManager.dropItems(enemy.x, enemy.y);
+      this.itemManager.dropItems(enemy.x, enemy.y, this.phase === 2);
     }
     enemy.destroy();
     this.score += SCORE_PER_ENEMY;

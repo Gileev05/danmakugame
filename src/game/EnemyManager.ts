@@ -39,6 +39,9 @@ import {
   HOVER_Y_MIN,
   HOVER_Y_MAX,
   HOVER_DESCEND_SPEED,
+  PHASE_1_DURATION_MS,
+  PHASE_1_SHOOTER_START_MS,
+  SPAWN_RATE_MIN,
   DIFFICULTY_PER_POWER,
 } from './constants';
 import { EnemyType, ExplosionShape, Difficulty } from './types';
@@ -91,8 +94,8 @@ export class EnemyManager {
     return ENEMY_SIZE;
   }
 
-  update(delta: number, seconds: number, power: number): void {
-    this.handleSpawning(delta, power);
+  update(delta: number, seconds: number, power: number, phaseTime: number): void {
+    this.handleSpawning(delta, power, phaseTime);
     this.handleHexagonSpawning(delta, power);
     this.updateEnemies(seconds);
     this.updateEnemyBullets(seconds);
@@ -112,16 +115,23 @@ export class EnemyManager {
 
   // ── Обычные враги ──────────────────────────────────────
 
-  private handleSpawning(delta: number, power: number): void {
+  private handleSpawning(delta: number, power: number, phaseTime: number): void {
+    // В фазе 1 спавнрейт плавно растёт от минимума до 100%.
+    const progress = Math.min(1, phaseTime / PHASE_1_DURATION_MS);
+    const spawnRate = SPAWN_RATE_MIN + (1 - SPAWN_RATE_MIN) * progress;
     this.enemySpawnCooldown -= delta;
     if (this.enemySpawnCooldown > 0) return;
 
-    this.spawnEnemy(power);
-    this.enemySpawnCooldown = ENEMY_SPAWN_INTERVAL_MS / this.getDifficultyMultiplier(power);
+    this.spawnEnemy(power, phaseTime);
+    this.enemySpawnCooldown =
+      ENEMY_SPAWN_INTERVAL_MS / (this.getDifficultyMultiplier(power) * spawnRate);
   }
 
-  private spawnEnemy(power: number): void {
-    const isShooter = Phaser.Math.Between(1, 100) <= ENEMY_SHOOTER_CHANCE_PERCENT;
+  private spawnEnemy(power: number, phaseTime: number): void {
+    // В первые 30 секунд фазы 1 спавнятся только треугольники.
+    const shootersAllowed = phaseTime >= PHASE_1_SHOOTER_START_MS;
+    const isShooter =
+      shootersAllowed && Phaser.Math.Between(1, 100) <= ENEMY_SHOOTER_CHANCE_PERCENT;
     const margin = ENEMY_SIZE / 2 + 8;
     const x = Phaser.Math.Between(margin, this.scene.scale.width - margin);
     const y = -ENEMY_SIZE / 2;

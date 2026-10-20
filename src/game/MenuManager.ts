@@ -85,6 +85,13 @@ export class MenuManager {
     const startY = height / 2 + SHOT_MENU_START_Y;
 
     const overlay = this.scene.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.8);
+    const phaseLabel = this.scene.add
+      .text(width / 2, height / 2 - 200, 'Фаза 2', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '24px',
+        color: '#facc15',
+      })
+      .setOrigin(0.5);
     const title = this.scene.add
       .text(width / 2, height / 2 - 150, 'ВЫБЕРИ ТИП СТРЕЛЬБЫ', {
         fontFamily: 'system-ui, sans-serif',
@@ -130,6 +137,7 @@ export class MenuManager {
 
     this.shotMenuObjects = [
       overlay,
+      phaseLabel,
       title,
       ...this.shotMenuIcons,
       ...this.shotMenuTexts,

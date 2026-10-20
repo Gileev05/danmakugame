@@ -105,6 +105,11 @@ export const HOVER_Y_MIN = 200; // ромбы зависают ниже шест
 export const HOVER_Y_MAX = 260;
 export const HOVER_DESCEND_SPEED = 60;
 
+// ── Фазы ────────────────────────────────────────────────
+export const PHASE_1_DURATION_MS = 60000; // фаза 1 длится 60 секунд
+export const PHASE_1_SHOOTER_START_MS = 30000; // ромбы появляются с 30-й секунды
+export const SPAWN_RATE_MIN = 0.25; // минимум спавнрейта в начале фазы 1
+
 // ── Сложность ───────────────────────────────────────────
 export const DIFFICULTY_PER_POWER = 0.5; // множитель сложности
 
