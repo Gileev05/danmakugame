@@ -144,10 +144,12 @@ export class GameScene extends Phaser.Scene {
     if (this.menuManager.isChoosing() || this.shotType !== null) return;
     if (this.power < SHOT_SELECT_POWER) return;
 
-    this.clearGameplayObjects();
+    // Игра просто ставится на паузу: объекты на экране остаются.
     this.menuManager.startShotSelection((type) => {
       this.shotType = type;
       this.shotSystem.setType(type);
+      // Убрать лазер, если он был нарисован до выбора.
+      this.shotSystem.clearLaser();
       this.startDifficultySelection();
     });
   }
@@ -162,7 +164,7 @@ export class GameScene extends Phaser.Scene {
 
   private startDifficultySelection(): void {
     if (this.difficultyPool.length === 0) return;
-    this.clearGameplayObjects();
+    // Игра просто ставится на паузу: объекты на экране остаются.
     this.menuManager.startDifficultySelection(
       DIFFICULTY_OPTIONS.filter((o) => o.diff !== null && this.difficultyPool.includes(o.diff)),
       (diff) => {
