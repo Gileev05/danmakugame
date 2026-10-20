@@ -45,6 +45,10 @@ export class GameScene extends Phaser.Scene {
   private difficultyPool: Difficulty[] = [];
   private nextDifficultyPower = SHOT_SELECT_POWER;
   private gameOver = false;
+  private paused = false;
+  private pauseOverlay: Phaser.GameObjects.GameObject[] = [];
+  private escKey!: Phaser.Input.Keyboard.Key;
+  private escWasDown = false;
   private respawnInvulnUntil = 0;
 
   constructor() {
@@ -62,6 +66,8 @@ export class GameScene extends Phaser.Scene {
     );
     this.nextDifficultyPower = SHOT_SELECT_POWER;
     this.gameOver = false;
+    this.paused = false;
+    this.pauseOverlay = [];
     this.respawnInvulnUntil = 0;
 
     const { width, height } = this.scale;
@@ -71,6 +77,7 @@ export class GameScene extends Phaser.Scene {
     }
     const cursors = this.input.keyboard.createCursorKeys();
     this.fireKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z);
+    this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
 
     this.player = new Player(this, width / 2, height - PLAYER_Y_MARGIN);
     this.enemyManager = new EnemyManager(this, this.player);
@@ -99,7 +106,7 @@ export class GameScene extends Phaser.Scene {
 
     // Подсказка по управлению — внизу экрана.
     this.add
-      .text(width / 2, height - 20, '← ↑ ↓ → — движение, Z — стрельба, собирай предметы', {
+      .text(width / 2, height - 20, '← ↑ ↓ → — движение, Z — стрельба, Esc — пауза', {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '16px',
         color: '#94a3b8',
@@ -110,6 +117,15 @@ export class GameScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     if (this.gameOver) return;
+
+    // Esc — пауза: срабатывает на новое нажатие, работает и во время паузы.
+    const escDown = this.escKey.isDown;
+    if (escDown && !this.escWasDown) {
+      this.togglePause();
+    }
+    this.escWasDown = escDown;
+
+    if (this.paused) return;
 
     // Во время выбора типа стрельбы или усложнения геймплей стоит на паузе.
     if (this.menuManager.isChoosing()) {
@@ -375,6 +391,43 @@ export class GameScene extends Phaser.Scene {
     const cx = ax + abx * t;
     const cy = ay + aby * t;
     return Math.hypot(px - cx, py - cy);
+  }
+
+  // ── Пауза ──────────────────────────────────────────────
+
+  private togglePause(): void {
+    if (this.gameOver || this.menuManager.isChoosing()) return;
+    this.paused = !this.paused;
+    if (this.paused) {
+      this.showPauseOverlay();
+    } else {
+      this.hidePauseOverlay();
+    }
+  }
+
+  private showPauseOverlay(): void {
+    const { width, height } = this.scale;
+    const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.75);
+    const title = this.add
+      .text(width / 2, height / 2 - 40, 'ПАУЗА', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '46px',
+        color: '#ffffff',
+      })
+      .setOrigin(0.5);
+    const hint = this.add
+      .text(width / 2, height / 2 + 40, 'Esc — продолжить', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '20px',
+        color: '#94a3b8',
+      })
+      .setOrigin(0.5);
+    this.pauseOverlay = [overlay, title, hint];
+  }
+
+  private hidePauseOverlay(): void {
+    for (const obj of this.pauseOverlay) obj.destroy();
+    this.pauseOverlay = [];
   }
 
   // ── Жизни и конец игры ─────────────────────────────────

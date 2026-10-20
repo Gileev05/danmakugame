@@ -59,7 +59,7 @@ export const ITEM_MAGNET_SPEED = 420;
 export const ITEM_SCATTER_SPEED_MIN = 60; // разлёт при взрыве
 export const ITEM_SCATTER_SPEED_MAX = 200;
 export const ITEM_SCATTER_DECAY = 3; // затухание разлёта, 1/с
-export const ITEM_POWER_CHANCE_PERCENT = 40; // шанс очка силы среди остальных
+export const ITEM_POWER_CHANCE_PERCENT = 25; // шанс очка силы среди остальных
 export const ITEM_SCORE_COLOR = 0x4ade80; // зелёный — очки счёта
 export const ITEM_POWER_COLOR = 0xfacc15; // жёлтый — очки силы
 
