@@ -19,6 +19,7 @@ export class ItemManager {
   private scene: Phaser.Scene;
   private player: Player;
   private items: Phaser.GameObjects.Group;
+  private attractAll = false;
 
   constructor(scene: Phaser.Scene, player: Player) {
     this.scene = scene;
@@ -28,6 +29,11 @@ export class ItemManager {
 
   getItems(): Phaser.GameObjects.Group {
     return this.items;
+  }
+
+  /** «Буст»: притягивать к игроку весь дроп независимо от расстояния. */
+  setAttractAll(value: boolean): void {
+    this.attractAll = value;
   }
 
   update(seconds: number, onCollect: (type: ItemType) => void): void {
@@ -46,8 +52,8 @@ export class ItemManager {
       const dy = this.player.y - item.y;
       const dist = Math.hypot(dx, dy);
 
-      if (dist < ITEM_MAGNET_RADIUS) {
-        // Магнит: предмет летит к игроку.
+      if (dist > 0 && (this.attractAll || dist < ITEM_MAGNET_RADIUS)) {
+        // Магнит: предмет летит к игроку (при «Бусте» — с любого расстояния).
         item.x += (dx / dist) * ITEM_MAGNET_SPEED * seconds;
         item.y += (dy / dist) * ITEM_MAGNET_SPEED * seconds;
       } else {

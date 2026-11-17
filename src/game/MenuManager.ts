@@ -11,12 +11,26 @@ import {
   DIFF_MENU_LABEL_X,
   DIFF_MENU_START_Y,
   DIFF_MENU_STEP_Y,
+  ABILITY_MENU_ICON_X,
+  ABILITY_MENU_LABEL_X,
+  ABILITY_MENU_START_Y,
+  ABILITY_MENU_STEP_Y,
+  ABILITY_COLORS,
+  CONTROL_MENU_START_Y,
+  CONTROL_MENU_STEP_Y,
   HEXAGON_COLOR,
   HEXAGON_EDGE_COLOR,
   ENEMY_COLOR,
   ENEMY_SHOOTER_COLOR,
 } from './constants';
-import { ShotType, Difficulty } from './types';
+import {
+  ShotType,
+  Difficulty,
+  AbilityType,
+  AbilityOption,
+  ControlScheme,
+  ControlOption,
+} from './types';
 
 /** Меню выбора типа стрельбы и усложнения: ↑ ↓ — выбор, Enter — подтвердить. */
 export class MenuManager {
@@ -48,6 +62,35 @@ export class MenuManager {
   private difficultyOptions: { diff: Difficulty; name: string; desc: string }[] = [];
   private onDifficultyChosen: ((diff: Difficulty) => void) | null = null;
 
+  private choosingAbility = false;
+  private abilityMenuObjects: Phaser.GameObjects.GameObject[] = [];
+  private abilityMenuIndex = 0;
+  private abilityMenuTexts: Phaser.GameObjects.Text[] = [];
+  private abilityMenuDescTexts: Phaser.GameObjects.Text[] = [];
+  private abilityMenuIcons: Phaser.GameObjects.Graphics[] = [];
+  private abilityMenuMarker!: Phaser.GameObjects.Text;
+  private abilityMenuUpWasDown = false;
+  private abilityMenuDownWasDown = false;
+  private abilityMenuEnterWasDown = false;
+  private abilityOptions: AbilityOption[] = [];
+  private onAbilityChosen: ((type: AbilityType) => void) | null = null;
+
+  private choosingControl = false;
+  private controlMenuObjects: Phaser.GameObjects.GameObject[] = [];
+  private controlMenuIndex = 0;
+  private controlMenuTexts: Phaser.GameObjects.Text[] = [];
+  private controlMenuDescTexts: Phaser.GameObjects.Text[] = [];
+  private controlMenuMarker!: Phaser.GameObjects.Text;
+  private controlMenuUpWasDown = false;
+  private controlMenuDownWasDown = false;
+  private controlMenuEnterWasDown = false;
+  private controlOptions: ControlOption[] = [];
+  private onControlChosen: ((scheme: ControlScheme) => void) | null = null;
+
+  private controlScheme: ControlScheme = 'keyboard';
+  private navUpKey!: Phaser.Input.Keyboard.Key;
+  private navDownKey!: Phaser.Input.Keyboard.Key;
+
   constructor(
     scene: Phaser.Scene,
     cursors: Phaser.Types.Input.Keyboard.CursorKeys,
@@ -56,15 +99,47 @@ export class MenuManager {
     this.scene = scene;
     this.cursors = cursors;
     this.enterKey = enterKey;
+
+    const keyboard = scene.input.keyboard;
+    if (!keyboard) {
+      throw new Error('Keyboard input is unavailable.');
+    }
+    this.navUpKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+    this.navDownKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+  }
+
+  /** Схема управления влияет на подсказки и клавиши навигации в меню. */
+  setControlScheme(scheme: ControlScheme): void {
+    this.controlScheme = scheme;
+  }
+
+  private isMenuUpDown(): boolean {
+    return this.controlScheme === 'mouse' ? this.navUpKey.isDown : this.cursors.up.isDown;
+  }
+
+  private isMenuDownDown(): boolean {
+    return this.controlScheme === 'mouse' ? this.navDownKey.isDown : this.cursors.down.isDown;
+  }
+
+  /** Подсказка навигации: W/S в схеме WASD, стрелки в клавиатурной. */
+  private navHint(): string {
+    return `${this.controlScheme === 'mouse' ? 'W S' : '↑ ↓'} — выбор, Enter — подтвердить`;
   }
 
   isChoosing(): boolean {
-    return this.choosingShot || this.choosingDifficulty;
+    return (
+      this.choosingShot ||
+      this.choosingDifficulty ||
+      this.choosingAbility ||
+      this.choosingControl
+    );
   }
 
   update(): void {
     if (this.choosingShot) this.updateShotSelection();
     if (this.choosingDifficulty) this.updateDifficultySelection();
+    if (this.choosingAbility) this.updateAbilitySelection();
+    if (this.choosingControl) this.updateControlSelection();
   }
 
   // ── Меню выбора типа стрельбы ──────────────────────────
@@ -76,8 +151,8 @@ export class MenuManager {
     this.shotMenuTexts = [];
     this.shotMenuIcons = [];
     // Клавиши, зажатые до открытия меню, не должны сразу сработать.
-    this.shotMenuUpWasDown = this.cursors.up.isDown;
-    this.shotMenuDownWasDown = this.cursors.down.isDown;
+    this.shotMenuUpWasDown = this.isMenuUpDown();
+    this.shotMenuDownWasDown = this.isMenuDownDown();
     this.shotMenuEnterWasDown = this.enterKey.isDown;
 
     const { width, height } = this.scene.scale;
@@ -127,7 +202,7 @@ export class MenuManager {
 
     // Подсказка управления на время выбора.
     const hint = this.scene.add
-      .text(width / 2, height - 40, '↑ ↓ — выбор, Enter — подтвердить', {
+      .text(width / 2, height - 40, this.navHint(), {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '18px',
         color: '#94a3b8',
@@ -182,8 +257,8 @@ export class MenuManager {
 
   /** Управление меню: ↑ ↓ — выбор, Enter — подтвердить. */
   private updateShotSelection(): void {
-    const up = this.cursors.up.isDown;
-    const down = this.cursors.down.isDown;
+    const up = this.isMenuUpDown();
+    const down = this.isMenuDownDown();
     const enter = this.enterKey.isDown;
 
     // Срабатываем только на новое нажатие, а не на удержание.
@@ -244,8 +319,8 @@ export class MenuManager {
     this.difficultyMenuDescTexts = [];
     this.difficultyMenuIcons = [];
     // Клавиши, зажатые до открытия меню, не должны сразу сработать.
-    this.difficultyMenuUpWasDown = this.cursors.up.isDown;
-    this.difficultyMenuDownWasDown = this.cursors.down.isDown;
+    this.difficultyMenuUpWasDown = this.isMenuUpDown();
+    this.difficultyMenuDownWasDown = this.isMenuDownDown();
     this.difficultyMenuEnterWasDown = this.enterKey.isDown;
 
     const { width, height } = this.scene.scale;
@@ -297,7 +372,7 @@ export class MenuManager {
       .setOrigin(0.5);
 
     const hint = this.scene.add
-      .text(width / 2, height - 40, '↑ ↓ — выбор, Enter — подтвердить', {
+      .text(width / 2, height - 40, this.navHint(), {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '18px',
         color: '#94a3b8',
@@ -355,8 +430,8 @@ export class MenuManager {
 
   /** Управление меню усложнения: ↑ ↓ — выбор, Enter — подтвердить. */
   private updateDifficultySelection(): void {
-    const up = this.cursors.up.isDown;
-    const down = this.cursors.down.isDown;
+    const up = this.isMenuUpDown();
+    const down = this.isMenuDownDown();
     const enter = this.enterKey.isDown;
 
     if (up && !this.difficultyMenuUpWasDown) {
@@ -401,5 +476,311 @@ export class MenuManager {
     for (const obj of this.difficultyMenuObjects) obj.destroy();
     this.difficultyMenuObjects = [];
     this.onDifficultyChosen?.(diff);
+  }
+
+  // ── Меню выбора активной способности ───────────────────
+
+  startAbilitySelection(options: AbilityOption[], onChosen: (type: AbilityType) => void): void {
+    this.abilityOptions = options;
+    this.onAbilityChosen = onChosen;
+    this.choosingAbility = true;
+    this.abilityMenuIndex = 0;
+    this.abilityMenuTexts = [];
+    this.abilityMenuDescTexts = [];
+    this.abilityMenuIcons = [];
+    // Клавиши, зажатые до открытия меню, не должны сразу сработать.
+    this.abilityMenuUpWasDown = this.isMenuUpDown();
+    this.abilityMenuDownWasDown = this.isMenuDownDown();
+    this.abilityMenuEnterWasDown = this.enterKey.isDown;
+
+    const { width, height } = this.scene.scale;
+    const centerX = width / 2;
+    const startY = height / 2 + ABILITY_MENU_START_Y;
+
+    const overlay = this.scene.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.8);
+    const title = this.scene.add
+      .text(width / 2, height / 2 - 150, 'ВЫБЕРИ АКТИВНУЮ СПОСОБНОСТЬ', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '36px',
+        color: '#ffffff',
+      })
+      .setOrigin(0.5);
+
+    // Ширина для переноса длинных описаний до правого края экрана.
+    const descWidth = width - (centerX + ABILITY_MENU_LABEL_X) - 30;
+
+    // Каждая способность: иконка, название, описание и перезарядка.
+    for (let i = 0; i < this.abilityOptions.length; i++) {
+      const opt = this.abilityOptions[i];
+      const y = startY + i * ABILITY_MENU_STEP_Y;
+      this.abilityMenuIcons.push(
+        this.createAbilityIcon(opt.ability, centerX + ABILITY_MENU_ICON_X, y),
+      );
+      this.abilityMenuTexts.push(
+        this.scene.add
+          .text(centerX + ABILITY_MENU_LABEL_X, y - 26, opt.name, {
+            fontFamily: 'system-ui, sans-serif',
+            fontSize: '24px',
+            color: '#ffffff',
+          })
+          .setOrigin(0, 0.5),
+      );
+      this.abilityMenuDescTexts.push(
+        this.scene.add
+          .text(
+            centerX + ABILITY_MENU_LABEL_X,
+            y - 6,
+            `${opt.desc}\nКД ${Math.round(opt.cooldownMs / 1000)} с`,
+            {
+              fontFamily: 'system-ui, sans-serif',
+              fontSize: '16px',
+              color: '#94a3b8',
+              wordWrap: { width: descWidth },
+            },
+          )
+          .setOrigin(0, 0),
+      );
+    }
+
+    this.abilityMenuMarker = this.scene.add
+      .text(0, 0, '▶', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '26px',
+        color: '#ffffff',
+      })
+      .setOrigin(0.5);
+
+    const hint = this.scene.add
+      .text(width / 2, height - 40, this.navHint(), {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '18px',
+        color: '#94a3b8',
+      })
+      .setOrigin(0.5)
+      .setAlpha(0.8);
+
+    this.abilityMenuObjects = [
+      overlay,
+      title,
+      ...this.abilityMenuIcons,
+      ...this.abilityMenuTexts,
+      ...this.abilityMenuDescTexts,
+      this.abilityMenuMarker,
+      hint,
+    ];
+
+    this.highlightAbilityOption();
+  }
+
+  /** Иконка активной способности: рисуется примитивами, без файлов-картинок. */
+  private createAbilityIcon(type: AbilityType, x: number, y: number): Phaser.GameObjects.Graphics {
+    const icon = this.scene.add.graphics();
+    const color = ABILITY_COLORS[type];
+
+    switch (type) {
+      case 'blank':
+        // Перечёркнутый снаряд — пули исчезают.
+        icon.lineStyle(3, color, 1);
+        icon.strokeCircle(x, y, 9);
+        icon.lineBetween(x - 8, y + 8, x + 8, y - 8);
+        break;
+      case 'medkit':
+        // Аптечка: белый крест.
+        icon.fillStyle(color, 1);
+        icon.fillRect(x - 10, y - 10, 20, 20);
+        icon.fillStyle(0xffffff, 1);
+        icon.fillRect(x - 2, y - 7, 4, 14);
+        icon.fillRect(x - 7, y - 2, 14, 4);
+        break;
+      case 'boost':
+        // Молния — ускорение.
+        icon.fillStyle(color, 1);
+        icon.fillTriangle(x + 2, y - 13, x - 9, y + 2, x - 1, y + 2);
+        icon.fillTriangle(x - 2, y + 13, x + 9, y - 2, x + 1, y - 2);
+        break;
+    }
+
+    return icon;
+  }
+
+  /** Управление меню способности: ↑ ↓ — выбор, Enter — подтвердить. */
+  private updateAbilitySelection(): void {
+    const up = this.isMenuUpDown();
+    const down = this.isMenuDownDown();
+    const enter = this.enterKey.isDown;
+
+    if (up && !this.abilityMenuUpWasDown) {
+      this.abilityMenuIndex =
+        (this.abilityMenuIndex - 1 + this.abilityOptions.length) % this.abilityOptions.length;
+      this.highlightAbilityOption();
+    }
+    if (down && !this.abilityMenuDownWasDown) {
+      this.abilityMenuIndex = (this.abilityMenuIndex + 1) % this.abilityOptions.length;
+      this.highlightAbilityOption();
+    }
+    if (enter && !this.abilityMenuEnterWasDown) {
+      this.chooseAbility(this.abilityOptions[this.abilityMenuIndex].ability);
+    }
+
+    this.abilityMenuUpWasDown = up;
+    this.abilityMenuDownWasDown = down;
+    this.abilityMenuEnterWasDown = enter;
+  }
+
+  /** Подсветка выбранной строки меню способности. */
+  private highlightAbilityOption(): void {
+    const startY = this.scene.scale.height / 2 + ABILITY_MENU_START_Y;
+    this.abilityMenuMarker.setPosition(
+      this.scene.scale.width / 2 + ABILITY_MENU_ICON_X - 24,
+      startY + this.abilityMenuIndex * ABILITY_MENU_STEP_Y,
+    );
+
+    for (let i = 0; i < this.abilityOptions.length; i++) {
+      const selected = i === this.abilityMenuIndex;
+      const type = this.abilityOptions[i].ability;
+      const color = selected ? `#${ABILITY_COLORS[type].toString(16).padStart(6, '0')}` : '#94a3b8';
+      this.abilityMenuTexts[i].setColor(color);
+      this.abilityMenuTexts[i].setAlpha(selected ? 1 : 0.6);
+      this.abilityMenuIcons[i].setAlpha(selected ? 1 : 0.5);
+    }
+  }
+
+  private chooseAbility(type: AbilityType): void {
+    if (!this.choosingAbility) return;
+    this.choosingAbility = false;
+    for (const obj of this.abilityMenuObjects) obj.destroy();
+    this.abilityMenuObjects = [];
+    this.onAbilityChosen?.(type);
+  }
+
+  // ── Меню выбора схемы управления ───────────────────────
+
+  startControlSelection(
+    options: ControlOption[],
+    onChosen: (scheme: ControlScheme) => void,
+  ): void {
+    this.controlOptions = options;
+    this.onControlChosen = onChosen;
+    this.choosingControl = true;
+    this.controlMenuIndex = 0;
+    this.controlMenuTexts = [];
+    this.controlMenuDescTexts = [];
+    // Клавиши, зажатые до открытия меню, не должны сразу сработать.
+    this.controlMenuUpWasDown = this.isMenuUpDown();
+    this.controlMenuDownWasDown = this.isMenuDownDown();
+    this.controlMenuEnterWasDown = this.enterKey.isDown;
+
+    const { width, height } = this.scene.scale;
+    const centerX = width / 2;
+    const startY = height / 2 + CONTROL_MENU_START_Y;
+
+    const overlay = this.scene.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.85);
+    const title = this.scene.add
+      .text(width / 2, height / 2 - 150, 'ВЫБЕРИ УПРАВЛЕНИЕ', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '38px',
+        color: '#ffffff',
+      })
+      .setOrigin(0.5);
+
+    // Каждая схема: название и подсказка по кнопкам.
+    for (let i = 0; i < this.controlOptions.length; i++) {
+      const opt = this.controlOptions[i];
+      const y = startY + i * CONTROL_MENU_STEP_Y;
+      this.controlMenuTexts.push(
+        this.scene.add
+          .text(centerX, y - 14, opt.name, {
+            fontFamily: 'system-ui, sans-serif',
+            fontSize: '26px',
+            color: '#ffffff',
+          })
+          .setOrigin(0.5),
+      );
+      this.controlMenuDescTexts.push(
+        this.scene.add
+          .text(centerX, y + 18, opt.desc, {
+            fontFamily: 'system-ui, sans-serif',
+            fontSize: '17px',
+            color: '#94a3b8',
+          })
+          .setOrigin(0.5),
+      );
+    }
+
+    this.controlMenuMarker = this.scene.add
+      .text(0, 0, '▶', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '26px',
+        color: '#ffffff',
+      })
+      .setOrigin(0.5);
+
+    const hint = this.scene.add
+      .text(width / 2, height - 40, '↑ ↓ — выбор, Enter — начать игру', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '18px',
+        color: '#94a3b8',
+      })
+      .setOrigin(0.5)
+      .setAlpha(0.8);
+
+    this.controlMenuObjects = [
+      overlay,
+      title,
+      ...this.controlMenuTexts,
+      ...this.controlMenuDescTexts,
+      this.controlMenuMarker,
+      hint,
+    ];
+
+    this.highlightControlOption();
+  }
+
+  /** Управление меню: ↑ ↓ — выбор, Enter — начать игру. */
+  private updateControlSelection(): void {
+    const up = this.isMenuUpDown();
+    const down = this.isMenuDownDown();
+    const enter = this.enterKey.isDown;
+
+    if (up && !this.controlMenuUpWasDown) {
+      this.controlMenuIndex =
+        (this.controlMenuIndex - 1 + this.controlOptions.length) % this.controlOptions.length;
+      this.highlightControlOption();
+    }
+    if (down && !this.controlMenuDownWasDown) {
+      this.controlMenuIndex = (this.controlMenuIndex + 1) % this.controlOptions.length;
+      this.highlightControlOption();
+    }
+    if (enter && !this.controlMenuEnterWasDown) {
+      this.chooseControl(this.controlOptions[this.controlMenuIndex].scheme);
+    }
+
+    this.controlMenuUpWasDown = up;
+    this.controlMenuDownWasDown = down;
+    this.controlMenuEnterWasDown = enter;
+  }
+
+  /** Подсветка выбранной схемы управления. */
+  private highlightControlOption(): void {
+    const startY = this.scene.scale.height / 2 + CONTROL_MENU_START_Y;
+    this.controlMenuMarker.setPosition(
+      this.scene.scale.width / 2 - 180,
+      startY + this.controlMenuIndex * CONTROL_MENU_STEP_Y - 14,
+    );
+
+    for (let i = 0; i < this.controlOptions.length; i++) {
+      const selected = i === this.controlMenuIndex;
+      this.controlMenuTexts[i].setColor(selected ? '#facc15' : '#94a3b8');
+      this.controlMenuTexts[i].setAlpha(selected ? 1 : 0.6);
+      this.controlMenuDescTexts[i].setAlpha(selected ? 0.95 : 0.5);
+    }
+  }
+
+  private chooseControl(scheme: ControlScheme): void {
+    if (!this.choosingControl) return;
+    this.choosingControl = false;
+    for (const obj of this.controlMenuObjects) obj.destroy();
+    this.controlMenuObjects = [];
+    this.onControlChosen?.(scheme);
   }
 }

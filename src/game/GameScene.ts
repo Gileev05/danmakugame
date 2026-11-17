@@ -4,6 +4,7 @@ import { ShotSystem } from './ShotSystem';
 import { EnemyManager } from './EnemyManager';
 import { ItemManager } from './ItemManager';
 import { MenuManager } from './MenuManager';
+import { AbilityManager } from './AbilityManager';
 import {
   PLAYER_LIVES,
   PLAYER_Y_MARGIN,
@@ -23,8 +24,12 @@ import {
   SHOT_SELECT_POWER,
   ENEMY_BULLET_RADIUS,
   DIFFICULTY_OPTIONS,
+  ABILITY_OPTIONS,
+  ABILITY_SELECT_POWER,
+  PLAYER_MAX_LIVES,
+  CONTROL_OPTIONS,
 } from './constants';
-import { ShotType, ItemType, BulletKind, EnemyType, Difficulty } from './types';
+import { ShotType, ItemType, BulletKind, EnemyType, Difficulty, ControlScheme } from './types';
 
 export class GameScene extends Phaser.Scene {
   private player!: Player;
@@ -32,16 +37,21 @@ export class GameScene extends Phaser.Scene {
   private enemyManager!: EnemyManager;
   private itemManager!: ItemManager;
   private menuManager!: MenuManager;
+  private abilityManager!: AbilityManager;
   private fireKey!: Phaser.Input.Keyboard.Key;
+  private xKey!: Phaser.Input.Keyboard.Key;
 
   private livesText!: Phaser.GameObjects.Text;
   private scoreText!: Phaser.GameObjects.Text;
   private powerText!: Phaser.GameObjects.Text;
+  private abilityText!: Phaser.GameObjects.Text;
+  private controlsHintText!: Phaser.GameObjects.Text;
 
   private lives = PLAYER_LIVES;
   private score = 0;
   private power = 0;
   private shotType: ShotType | null = null;
+  private controlScheme: ControlScheme = 'keyboard';
   private difficultyPool: Difficulty[] = [];
   private nextDifficultyPower = SHOT_SELECT_POWER;
   private phase = 1;
@@ -64,6 +74,7 @@ export class GameScene extends Phaser.Scene {
     this.score = 0;
     this.power = 0;
     this.shotType = null;
+    this.controlScheme = 'keyboard';
     this.difficultyPool = DIFFICULTY_OPTIONS.map((o) => o.diff).filter(
       (d): d is Difficulty => d !== null,
     );
@@ -81,13 +92,24 @@ export class GameScene extends Phaser.Scene {
     }
     const cursors = this.input.keyboard.createCursorKeys();
     this.fireKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z);
+    this.xKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X);
     this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.enterKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+
+    // ПКМ используется как кнопка способности — отключаем контекстное меню.
+    this.input.mouse?.disableContextMenu();
 
     this.player = new Player(this, width / 2, height - PLAYER_Y_MARGIN);
     this.enemyManager = new EnemyManager(this, this.player);
     this.shotSystem = new ShotSystem(this, this.player, this.enemyManager.getEnemies(), this.fireKey);
     this.itemManager = new ItemManager(this, this.player);
+    this.abilityManager = new AbilityManager(
+      this.enemyManager,
+      this.itemManager,
+      this.shotSystem,
+      () => this.isAbilityDown(),
+      () => this.healPlayer(),
+    );
     this.menuManager = new MenuManager(this, cursors, this.enterKey);
 
     this.livesText = this.add.text(24, 20, '', {
@@ -107,6 +129,12 @@ export class GameScene extends Phaser.Scene {
       fontSize: '22px',
       color: '#facc15',
     });
+    // Активная способность (кнопка X) — под силой.
+    this.abilityText = this.add.text(24, 84, '', {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '20px',
+      color: '#f472b6',
+    });
     // Фаза — в правом верхнем углу, под счётом.
     this.phaseText = this.add
       .text(width - 24, 52, '', {
@@ -117,16 +145,28 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(1, 0);
     this.updateHud();
     this.updatePhaseHud();
+    this.updateAbilityHud();
 
     // Подсказка по управлению — внизу экрана.
-    this.add
-      .text(width / 2, height - 20, '← ↑ ↓ → — движение, Z — стрельба, Esc — пауза', {
+    this.controlsHintText = this.add
+      .text(width / 2, height - 20, '', {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '16px',
         color: '#94a3b8',
       })
       .setOrigin(0.5)
       .setAlpha(0.7);
+    this.updateControlsHint();
+
+    // Перед началом игры — выбор схемы управления.
+    this.menuManager.startControlSelection(CONTROL_OPTIONS, (scheme) => {
+      this.controlScheme = scheme;
+      this.player.setControlScheme(scheme);
+      this.shotSystem.setControlScheme(scheme);
+      this.menuManager.setControlScheme(scheme);
+      this.updateControlsHint();
+      this.updateAbilityHud();
+    });
   }
 
   update(_time: number, delta: number): void {
@@ -156,9 +196,12 @@ export class GameScene extends Phaser.Scene {
     this.player.update(seconds);
     this.shotSystem.update(delta, seconds, this.power);
     this.enemyManager.update(delta, seconds, this.power);
+    this.abilityManager.update(delta);
+    this.updateAbilityHud();
     this.itemManager.update(seconds, (type) => this.collectItem(type));
     this.checkShotSelection();
     this.checkDifficultySelection();
+    this.checkAbilitySelection();
     this.checkCollisions(seconds);
     this.updateInvulnerability();
   }
@@ -213,6 +256,58 @@ export class GameScene extends Phaser.Scene {
         this.nextDifficultyPower += 1.0;
       },
     );
+  }
+
+  // ── Активная способность ───────────────────────────────
+
+  /** При достижении нужной силы игрок выбирает одну активную способность. */
+  private checkAbilitySelection(): void {
+    if (this.menuManager.isChoosing()) return;
+    if (this.abilityManager.selected !== null) return;
+    if (this.power < ABILITY_SELECT_POWER) return;
+
+    this.menuManager.startAbilitySelection(ABILITY_OPTIONS, (ability) => {
+      this.abilityManager.setAbility(ability);
+      this.updateAbilityHud();
+    });
+  }
+
+  /** Кнопка способности: X на клавиатуре или ПКМ в схеме с мышью. */
+  private isAbilityDown(): boolean {
+    if (this.controlScheme === 'mouse') {
+      return this.input.activePointer.rightButtonDown();
+    }
+    return this.xKey.isDown;
+  }
+
+  private updateControlsHint(): void {
+    const text =
+      this.controlScheme === 'mouse'
+        ? 'WASD — движение, ЛКМ — стрельба, ПКМ — активка, Esc — пауза'
+        : '← ↑ ↓ → — движение, Z — стрельба, X — активка, Esc — пауза';
+    this.controlsHintText.setText(text);
+  }
+
+  /** Лечение «Аптечкой»; false — если жизни уже на максимуме. */
+  private healPlayer(): boolean {
+    if (this.lives >= PLAYER_MAX_LIVES) return false;
+    this.lives += 1;
+    this.updateHud();
+    return true;
+  }
+
+  private updateAbilityHud(): void {
+    const keyLabel = this.controlScheme === 'mouse' ? 'ПКМ' : 'X';
+    if (this.abilityManager.selected === null) {
+      this.abilityText.setText(
+        `${keyLabel}: способность откроется на силе ${ABILITY_SELECT_POWER.toFixed(2)}`,
+      );
+      return;
+    }
+
+    const remain = this.abilityManager.cooldownRemainingMs;
+    const status = remain > 0 ? `${Math.ceil(remain / 1000)} с` : 'готово';
+    this.abilityText.setText(`${keyLabel}: ${this.abilityManager.selectedName} (${status})`);
   }
 
   private clearGameplayObjects(): void {

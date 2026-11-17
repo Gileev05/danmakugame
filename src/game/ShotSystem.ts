@@ -19,7 +19,7 @@ import {
   PLAYER_HEIGHT,
   getShotTier,
 } from './constants';
-import { ShotType, BulletKind } from './types';
+import { ShotType, BulletKind, ControlScheme } from './types';
 
 /** Стрельба игрока: базовый выстрел, самонаводка, лазер и ракеты. */
 export class ShotSystem {
@@ -33,6 +33,8 @@ export class ShotSystem {
   private shotType: ShotType | null = null;
   private fireCooldown = 0;
   private power = 0;
+  private fireRateMultiplier = 1;
+  private controlScheme: ControlScheme = 'keyboard';
 
   constructor(
     scene: Phaser.Scene,
@@ -54,6 +56,24 @@ export class ShotSystem {
 
   setType(type: ShotType | null): void {
     this.shotType = type;
+  }
+
+  /** Множитель темпа стрельбы: 1 — обычный, 2 — вдвое чаще («Буст»). */
+  setFireRateMultiplier(multiplier: number): void {
+    this.fireRateMultiplier = Math.max(1, multiplier);
+  }
+
+  /** Переключить схему управления (выбирается до старта игры). */
+  setControlScheme(scheme: ControlScheme): void {
+    this.controlScheme = scheme;
+  }
+
+  /** Стрельба: Z на клавиатуре или ЛКМ в схеме с мышью. */
+  private isFireDown(): boolean {
+    if (this.controlScheme === 'mouse') {
+      return this.scene.input.activePointer.leftButtonDown();
+    }
+    return this.fireKey.isDown;
   }
 
   getBullets(): Phaser.GameObjects.Group {
@@ -88,11 +108,13 @@ export class ShotSystem {
       return;
     }
 
-    if (!this.fireKey.isDown || this.fireCooldown > 0) return;
+    if (!this.isFireDown() || this.fireCooldown > 0) return;
 
     this.fireShot();
     // Ракеты стреляют медленнее обычного выстрела.
-    this.fireCooldown = this.shotType === 'rocket' ? ROCKET_FIRE_INTERVAL_MS : FIRE_BASE_INTERVAL_MS;
+    const baseInterval =
+      this.shotType === 'rocket' ? ROCKET_FIRE_INTERVAL_MS : FIRE_BASE_INTERVAL_MS;
+    this.fireCooldown = baseInterval / this.fireRateMultiplier;
   }
 
   /** Выстрел по выбранному типу; до выбора — базовый. */
@@ -154,7 +176,7 @@ export class ShotSystem {
   private updateLaser(): void {
     this.laserGraphics.clear();
     this.laserSegments = [];
-    if (!this.fireKey.isDown) return;
+    if (!this.isFireDown()) return;
 
     const tier = getShotTier(this.power);
     const count = tier;

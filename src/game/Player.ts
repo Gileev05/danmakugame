@@ -7,6 +7,7 @@ import {
   PLAYER_EDGE_COLOR,
   PLAYER_HITBOX_SIZE,
 } from './constants';
+import { ControlScheme } from './types';
 
 /** Игрок: модель-треугольник, движение и видимый хитбокс. */
 export class Player {
@@ -16,6 +17,8 @@ export class Player {
 
   private scene: Phaser.Scene;
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys;
+  private wasd: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
+  private controlScheme: ControlScheme = 'keyboard';
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     this.scene = scene;
@@ -23,6 +26,12 @@ export class Player {
       throw new Error('Keyboard input is unavailable.');
     }
     this.cursors = scene.input.keyboard.createCursorKeys();
+    this.wasd = scene.input.keyboard.addKeys({
+      up: Phaser.Input.Keyboard.KeyCodes.W,
+      down: Phaser.Input.Keyboard.KeyCodes.S,
+      left: Phaser.Input.Keyboard.KeyCodes.A,
+      right: Phaser.Input.Keyboard.KeyCodes.D,
+    }) as Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
 
     const halfW = PLAYER_WIDTH / 2;
     const halfH = PLAYER_HEIGHT / 2;
@@ -51,6 +60,11 @@ export class Player {
     return this.sprite.alpha;
   }
 
+  /** Переключить схему управления (выбирается до старта игры). */
+  setControlScheme(scheme: ControlScheme): void {
+    this.controlScheme = scheme;
+  }
+
   update(seconds: number): void {
     this.move(seconds);
     this.keepOnScreen();
@@ -74,10 +88,11 @@ export class Player {
     let dx = 0;
     let dy = 0;
 
-    if (this.cursors.left.isDown) dx -= 1;
-    if (this.cursors.right.isDown) dx += 1;
-    if (this.cursors.up.isDown) dy -= 1;
-    if (this.cursors.down.isDown) dy += 1;
+    const keys = this.controlScheme === 'mouse' ? this.wasd : this.cursors;
+    if (keys.left.isDown) dx -= 1;
+    if (keys.right.isDown) dx += 1;
+    if (keys.up.isDown) dy -= 1;
+    if (keys.down.isDown) dy += 1;
 
     if (dx === 0 && dy === 0) return;
 

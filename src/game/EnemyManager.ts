@@ -24,12 +24,10 @@ import {
   HEXAGON_HP,
   HEXAGON_BULLET_SPEED,
   HEXAGON_BULLET_RADIUS,
-  HEXAGON_BULLET_COLOR,
   HEXAGON_ARM_DISTANCE,
   HEXAGON_INDICATOR_MS,
   HEXAGON_BULLET_FUSE_MS,
   HEXAGON_EXPLOSION_BULLET_SPEED,
-  HEXAGON_EXPLOSION_COLOR,
   HEXAGON_COLOR,
   HEXAGON_EDGE_COLOR,
   SPLIT_ENEMY_SIZE,
@@ -56,6 +54,7 @@ export class EnemyManager {
   private difficulties: Set<Difficulty> = new Set();
   private enemySpawnCooldown = 0;
   private hexagonSpawnCooldown = 0;
+  private silencedUntil = 0;
 
   constructor(scene: Phaser.Scene, player: Player) {
     this.scene = scene;
@@ -104,8 +103,30 @@ export class EnemyManager {
 
   clearAll(): void {
     this.enemies.clear(true, true);
+    this.clearEnemyBullets();
+    this.silencedUntil = 0;
+  }
+
+  /** Убрать все вражеские снаряды с экрана (способность «Пустышка»). */
+  clearEnemyBullets(): void {
+    // У снарядов шестиугольника есть отдельный индикатор — его тоже убираем.
+    for (const child of [...this.hexagonBullets.getChildren()]) {
+      const indicator = (child as Phaser.GameObjects.Arc).getData('indicator') as
+        | Phaser.GameObjects.Text
+        | undefined;
+      indicator?.destroy();
+    }
     this.enemyBullets.clear(true, true);
     this.hexagonBullets.clear(true, true);
+  }
+
+  /** Запретить врагам стрелять на durationMs (способность «Пустышка»). */
+  silenceShooting(durationMs: number): void {
+    this.silencedUntil = Math.max(this.silencedUntil, this.scene.time.now + durationMs);
+  }
+
+  private isSilenced(): boolean {
+    return this.scene.time.now < this.silencedUntil;
   }
 
   /** Множитель сложности: 1.0 при силе 0.00, 2.0 при силе 4.00. */
@@ -145,9 +166,13 @@ export class EnemyManager {
         .setStrokeStyle(2, ENEMY_SHOOTER_EDGE_COLOR);
     } else {
       // Треугольник остриём вниз: простой враг.
+      // Точки задаём в координатах от 0 до ENEMY_SIZE: Phaser у Shape
+      // вычитает displayOrigin (половину размера), поэтому отрицательные
+      // координаты смещали рисунок относительно центра хитбокса.
       enemy = this.scene.add
-        .triangle(x, y, -half, -half, half, -half, 0, half, ENEMY_COLOR)
-        .setStrokeStyle(2, ENEMY_EDGE_COLOR);
+        .triangle(x, y, 0, 0, ENEMY_SIZE, 0, half, ENEMY_SIZE, ENEMY_COLOR)
+        .setStrokeStyle(2, ENEMY_EDGE_COLOR)
+        .setOrigin(0.5, 0.5);
     }
 
     enemy.setData('type', isShooter ? 'shooter' : 'flyer');
@@ -215,8 +240,19 @@ export class EnemyManager {
     for (let i = 0; i < 2; i++) {
       const offset = i === 0 ? -10 : 10;
       const small = this.scene.add
-        .triangle(x + offset, y, -half, -half, half, -half, 0, half, ENEMY_COLOR)
-        .setStrokeStyle(2, ENEMY_EDGE_COLOR);
+        .triangle(
+          x + offset,
+          y,
+          0,
+          0,
+          SPLIT_ENEMY_SIZE,
+          0,
+          half,
+          SPLIT_ENEMY_SIZE,
+          ENEMY_COLOR,
+        )
+        .setStrokeStyle(2, ENEMY_EDGE_COLOR)
+        .setOrigin(0.5, 0.5);
 
       small.setData('type', 'split');
       small.setData('splitTimer', SPLIT_UP_TIME_MS);
@@ -244,6 +280,8 @@ export class EnemyManager {
   }
 
   private enemyShoot(enemy: Phaser.GameObjects.Shape): void {
+    if (this.isSilenced()) return;
+
     const dx = this.player.x - enemy.x;
     const dy = this.player.y - enemy.y;
     const length = Math.hypot(dx, dy);
@@ -327,11 +365,13 @@ export class EnemyManager {
 
   /** Медленный снаряд, наводящийся на игрока и взрывающийся. */
   private hexagonShoot(hex: Phaser.GameObjects.Shape): void {
+    if (this.isSilenced()) return;
+
     const bullet = this.scene.add.circle(
       hex.x,
       hex.y + HEXAGON_SIZE / 2,
       HEXAGON_BULLET_RADIUS,
-      HEXAGON_BULLET_COLOR,
+      ENEMY_BULLET_COLOR,
     );
     bullet.setData('fuse', HEXAGON_BULLET_FUSE_MS);
     bullet.setData('arming', false);
@@ -343,7 +383,7 @@ export class EnemyManager {
       .text(bullet.x, bullet.y, '', {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '24px',
-        color: '#fbbf24',
+        color: `#${ENEMY_BULLET_COLOR.toString(16).padStart(6, '0')}`,
       })
       .setOrigin(0.5)
       .setStroke('#000000', 3)
@@ -408,7 +448,7 @@ export class EnemyManager {
     const angles = shape === 'plus' ? [0, 90, 180, 270] : [45, 135, 225, 315];
     for (const deg of angles) {
       const rad = Phaser.Math.DegToRad(deg);
-      const bullet = this.scene.add.circle(x, y, ENEMY_BULLET_RADIUS, HEXAGON_EXPLOSION_COLOR);
+      const bullet = this.scene.add.circle(x, y, ENEMY_BULLET_RADIUS, ENEMY_BULLET_COLOR);
       bullet.setData('vx', Math.cos(rad) * HEXAGON_EXPLOSION_BULLET_SPEED);
       bullet.setData('vy', Math.sin(rad) * HEXAGON_EXPLOSION_BULLET_SPEED);
       this.enemyBullets.add(bullet);
