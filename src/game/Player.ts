@@ -6,6 +6,7 @@ import {
   PLAYER_COLOR,
   PLAYER_EDGE_COLOR,
   PLAYER_HITBOX_SIZE,
+  PLAYFIELD_WIDTH,
 } from './constants';
 import { ControlScheme } from './types';
 
@@ -104,7 +105,7 @@ export class Player {
   private keepOnScreen(): void {
     const halfW = PLAYER_WIDTH / 2;
     const halfH = PLAYER_HEIGHT / 2;
-    this.sprite.x = Phaser.Math.Clamp(this.sprite.x, halfW, this.scene.scale.width - halfW);
+    this.sprite.x = Phaser.Math.Clamp(this.sprite.x, halfW, PLAYFIELD_WIDTH - halfW);
     this.sprite.y = Phaser.Math.Clamp(this.sprite.y, halfH, this.scene.scale.height - halfH);
   }
 }

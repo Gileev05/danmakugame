@@ -29,8 +29,8 @@ body {
 }
 
 #game {
-  /* Ширина должна совпадать с width в src/game/config.ts */
-  width: min(100%, 600px);
+  /* Ширина должна совпадать с width в src/game/config.ts (поле + панель UI). */
+  width: min(100%, 780px);
   height: min(100%, 640px);
   min-height: 320px;
   border-radius: 12px;

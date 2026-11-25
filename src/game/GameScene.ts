@@ -28,6 +28,16 @@ import {
   ABILITY_SELECT_POWER,
   PLAYER_MAX_LIVES,
   CONTROL_OPTIONS,
+  SHOT_NAMES,
+  PLAYFIELD_WIDTH,
+  UI_PANEL_WIDTH,
+  UI_PANEL_COLOR,
+  UI_PANEL_BORDER_COLOR,
+  UI_PANEL_PADDING,
+  UI_LABEL_COLOR,
+  UI_VALUE_COLOR,
+  UI_HEART_COLOR,
+  UI_HEART_EMPTY_COLOR,
 } from './constants';
 import { ShotType, ItemType, BulletKind, EnemyType, Difficulty, ControlScheme } from './types';
 
@@ -40,12 +50,14 @@ export class GameScene extends Phaser.Scene {
   private abilityManager!: AbilityManager;
   private fireKey!: Phaser.Input.Keyboard.Key;
   private xKey!: Phaser.Input.Keyboard.Key;
+  private escKey!: Phaser.Input.Keyboard.Key;
 
-  private livesText!: Phaser.GameObjects.Text;
-  private scoreText!: Phaser.GameObjects.Text;
-  private powerText!: Phaser.GameObjects.Text;
-  private abilityText!: Phaser.GameObjects.Text;
-  private controlsHintText!: Phaser.GameObjects.Text;
+  private livesGfx!: Phaser.GameObjects.Graphics;
+  private scoreValueText!: Phaser.GameObjects.Text;
+  private powerValueText!: Phaser.GameObjects.Text;
+  private shotTypeValueText!: Phaser.GameObjects.Text;
+  private abilityNameText!: Phaser.GameObjects.Text;
+  private abilityCooldownText!: Phaser.GameObjects.Text;
 
   private lives = PLAYER_LIVES;
   private score = 0;
@@ -54,14 +66,10 @@ export class GameScene extends Phaser.Scene {
   private controlScheme: ControlScheme = 'keyboard';
   private difficultyPool: Difficulty[] = [];
   private nextDifficultyPower = SHOT_SELECT_POWER;
-  private phase = 1;
-  private phaseText!: Phaser.GameObjects.Text;
   private enterKey!: Phaser.Input.Keyboard.Key;
   private gameOver = false;
   private paused = false;
   private pauseOverlay: Phaser.GameObjects.GameObject[] = [];
-  private escKey!: Phaser.Input.Keyboard.Key;
-  private escWasDown = false;
   private respawnInvulnUntil = 0;
 
   constructor() {
@@ -79,13 +87,12 @@ export class GameScene extends Phaser.Scene {
       (d): d is Difficulty => d !== null,
     );
     this.nextDifficultyPower = SHOT_SELECT_POWER;
-    this.phase = 1;
     this.gameOver = false;
     this.paused = false;
     this.pauseOverlay = [];
     this.respawnInvulnUntil = 0;
 
-    const { width, height } = this.scale;
+    const { height } = this.scale;
 
     if (!this.input.keyboard) {
       throw new Error('Keyboard input is unavailable.');
@@ -93,13 +100,17 @@ export class GameScene extends Phaser.Scene {
     const cursors = this.input.keyboard.createCursorKeys();
     this.fireKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z);
     this.xKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X);
-    this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.enterKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+    // Пауза по Esc: слушаем событие самой клавиши (а не опрос JustDown),
+    // чтобы не терять быстрые нажатия, когда keydown и keyup приходят
+    // в одном кадре.
+    this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.escKey.on('down', () => this.togglePause());
 
     // ПКМ используется как кнопка способности — отключаем контекстное меню.
     this.input.mouse?.disableContextMenu();
 
-    this.player = new Player(this, width / 2, height - PLAYER_Y_MARGIN);
+    this.player = new Player(this, PLAYFIELD_WIDTH / 2, height - PLAYER_Y_MARGIN);
     this.enemyManager = new EnemyManager(this, this.player);
     this.shotSystem = new ShotSystem(this, this.player, this.enemyManager.getEnemies(), this.fireKey);
     this.itemManager = new ItemManager(this, this.player);
@@ -112,51 +123,84 @@ export class GameScene extends Phaser.Scene {
     );
     this.menuManager = new MenuManager(this, cursors, this.enterKey);
 
-    this.livesText = this.add.text(24, 20, '', {
+    // Боковая панель UI справа: игровое поле остаётся шириной PLAYFIELD_WIDTH.
+    this.add
+      .rectangle(PLAYFIELD_WIDTH, 0, UI_PANEL_WIDTH, height, UI_PANEL_COLOR)
+      .setOrigin(0, 0);
+    this.add
+      .rectangle(PLAYFIELD_WIDTH, 0, 2, height, UI_PANEL_BORDER_COLOR)
+      .setOrigin(0, 0);
+
+    // Сердечки жизней — в самом верху панели.
+    this.livesGfx = this.add.graphics();
+
+    // Счёт — сразу под жизнями.
+    this.add.text(PLAYFIELD_WIDTH + UI_PANEL_PADDING, 62, 'Счёт', {
       fontFamily: 'system-ui, sans-serif',
-      fontSize: '22px',
-      color: '#ffffff',
+      fontSize: '16px',
+      color: UI_LABEL_COLOR,
     });
-    this.scoreText = this.add
-      .text(width - 24, 20, '', {
+    this.scoreValueText = this.add.text(PLAYFIELD_WIDTH + UI_PANEL_PADDING, 84, '0', {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '28px',
+      color: UI_VALUE_COLOR,
+    });
+
+    // Сила.
+    this.add.text(PLAYFIELD_WIDTH + UI_PANEL_PADDING, 132, 'Сила', {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '16px',
+      color: UI_LABEL_COLOR,
+    });
+    this.powerValueText = this.add.text(PLAYFIELD_WIDTH + UI_PANEL_PADDING, 154, '0.00', {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '24px',
+      color: UI_VALUE_COLOR,
+    });
+
+    // Тип стрельбы.
+    this.add.text(PLAYFIELD_WIDTH + UI_PANEL_PADDING, 202, 'Тип выстрела', {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '16px',
+      color: UI_LABEL_COLOR,
+    });
+    this.shotTypeValueText = this.add.text(
+      PLAYFIELD_WIDTH + UI_PANEL_PADDING,
+      224,
+      'не выбран',
+      {
         fontFamily: 'system-ui, sans-serif',
-        fontSize: '22px',
-        color: '#ffffff',
-      })
-      .setOrigin(1, 0);
-    this.powerText = this.add.text(24, 52, '', {
+        fontSize: '18px',
+        color: UI_VALUE_COLOR,
+        wordWrap: { width: UI_PANEL_WIDTH - UI_PANEL_PADDING * 2 },
+      },
+    );
+
+    // Активная способность и её перезарядка.
+    this.add.text(PLAYFIELD_WIDTH + UI_PANEL_PADDING, 272, 'Способность', {
       fontFamily: 'system-ui, sans-serif',
-      fontSize: '22px',
-      color: '#facc15',
+      fontSize: '16px',
+      color: UI_LABEL_COLOR,
     });
-    // Активная способность (кнопка X) — под силой.
-    this.abilityText = this.add.text(24, 84, '', {
+    this.abilityNameText = this.add.text(
+      PLAYFIELD_WIDTH + UI_PANEL_PADDING,
+      294,
+      'не выбрана',
+      {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '18px',
+        color: UI_VALUE_COLOR,
+        wordWrap: { width: UI_PANEL_WIDTH - UI_PANEL_PADDING * 2 },
+      },
+    );
+    this.abilityCooldownText = this.add.text(PLAYFIELD_WIDTH + UI_PANEL_PADDING, 318, '', {
       fontFamily: 'system-ui, sans-serif',
-      fontSize: '20px',
+      fontSize: '16px',
       color: '#f472b6',
     });
-    // Фаза — в правом верхнем углу, под счётом.
-    this.phaseText = this.add
-      .text(width - 24, 52, '', {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '22px',
-        color: '#facc15',
-      })
-      .setOrigin(1, 0);
-    this.updateHud();
-    this.updatePhaseHud();
-    this.updateAbilityHud();
 
-    // Подсказка по управлению — внизу экрана.
-    this.controlsHintText = this.add
-      .text(width / 2, height - 20, '', {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '16px',
-        color: '#94a3b8',
-      })
-      .setOrigin(0.5)
-      .setAlpha(0.7);
-    this.updateControlsHint();
+    this.updateHud();
+    this.updateAbilityHud();
 
     // Перед началом игры — выбор схемы управления.
     this.menuManager.startControlSelection(CONTROL_OPTIONS, (scheme) => {
@@ -164,20 +208,11 @@ export class GameScene extends Phaser.Scene {
       this.player.setControlScheme(scheme);
       this.shotSystem.setControlScheme(scheme);
       this.menuManager.setControlScheme(scheme);
-      this.updateControlsHint();
-      this.updateAbilityHud();
     });
   }
 
   update(_time: number, delta: number): void {
     if (this.gameOver) return;
-
-    // Esc — пауза: срабатывает на новое нажатие, работает и во время паузы.
-    const escDown = this.escKey.isDown;
-    if (escDown && !this.escWasDown) {
-      this.togglePause();
-    }
-    this.escWasDown = escDown;
 
     if (this.paused) return;
 
@@ -188,10 +223,6 @@ export class GameScene extends Phaser.Scene {
     }
 
     const seconds = delta / 1000;
-
-    // Фаза зависит от силы: 1 — до 1.00, 2 — после.
-    this.phase = this.power >= SHOT_SELECT_POWER ? 2 : 1;
-    this.updatePhaseHud();
 
     this.player.update(seconds);
     this.shotSystem.update(delta, seconds, this.power);
@@ -217,10 +248,6 @@ export class GameScene extends Phaser.Scene {
     this.updateHud();
   }
 
-  private updatePhaseHud(): void {
-    this.phaseText.setText(`Фаза ${this.phase}`);
-  }
-
   private checkShotSelection(): void {
     if (this.menuManager.isChoosing() || this.shotType !== null) return;
     if (this.power < SHOT_SELECT_POWER) return;
@@ -231,6 +258,7 @@ export class GameScene extends Phaser.Scene {
       this.shotSystem.setType(type);
       // Убрать лазер, если он был нарисован до выбора.
       this.shotSystem.clearLaser();
+      this.updateHud();
       this.startDifficultySelection();
     });
   }
@@ -280,34 +308,12 @@ export class GameScene extends Phaser.Scene {
     return this.xKey.isDown;
   }
 
-  private updateControlsHint(): void {
-    const text =
-      this.controlScheme === 'mouse'
-        ? 'WASD — движение, ЛКМ — стрельба, ПКМ — активка, Esc — пауза'
-        : '← ↑ ↓ → — движение, Z — стрельба, X — активка, Esc — пауза';
-    this.controlsHintText.setText(text);
-  }
-
   /** Лечение «Аптечкой»; false — если жизни уже на максимуме. */
   private healPlayer(): boolean {
     if (this.lives >= PLAYER_MAX_LIVES) return false;
     this.lives += 1;
     this.updateHud();
     return true;
-  }
-
-  private updateAbilityHud(): void {
-    const keyLabel = this.controlScheme === 'mouse' ? 'ПКМ' : 'X';
-    if (this.abilityManager.selected === null) {
-      this.abilityText.setText(
-        `${keyLabel}: способность откроется на силе ${ABILITY_SELECT_POWER.toFixed(2)}`,
-      );
-      return;
-    }
-
-    const remain = this.abilityManager.cooldownRemainingMs;
-    const status = remain > 0 ? `${Math.ceil(remain / 1000)} с` : 'готово';
-    this.abilityText.setText(`${keyLabel}: ${this.abilityManager.selectedName} (${status})`);
   }
 
   private clearGameplayObjects(): void {
@@ -558,8 +564,8 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Возрождение внизу по центру с краткой неуязвимостью.
-    this.player.setPosition(this.scale.width / 2, this.scale.height - PLAYER_Y_MARGIN);
+    // Возрождение внизу по центру игрового поля с краткой неуязвимостью.
+    this.player.setPosition(PLAYFIELD_WIDTH / 2, this.scale.height - PLAYER_Y_MARGIN);
     this.respawnInvulnUntil = this.time.now + RESPAWN_INVULN_MS;
   }
 
@@ -620,8 +626,47 @@ export class GameScene extends Phaser.Scene {
   // ── HUD ────────────────────────────────────────────────
 
   private updateHud(): void {
-    this.livesText.setText(`Жизни: ${this.lives}`);
-    this.scoreText.setText(`Счёт: ${this.score}`);
-    this.powerText.setText(`Сила: ${this.power.toFixed(2)}`);
+    this.drawLives();
+    this.scoreValueText.setText(String(this.score));
+    this.powerValueText.setText(this.power.toFixed(2));
+    this.shotTypeValueText.setText(
+      this.shotType === null ? 'не выбран' : SHOT_NAMES[this.shotType],
+    );
+  }
+
+  /** Выбранная способность и её перезарядка в боковой панели. */
+  private updateAbilityHud(): void {
+    if (this.abilityManager.selected === null) {
+      this.abilityNameText.setText('не выбрана');
+      this.abilityCooldownText.setText('');
+      return;
+    }
+
+    this.abilityNameText.setText(this.abilityManager.selectedName);
+    const remain = this.abilityManager.cooldownRemainingMs;
+    this.abilityCooldownText.setText(remain > 0 ? `КД: ${Math.ceil(remain / 1000)} с` : 'готово');
+  }
+
+  /** Сердечки: заполненные — текущие жизни, пустые — свободные слоты. */
+  private drawLives(): void {
+    this.livesGfx.clear();
+    for (let i = 0; i < PLAYER_MAX_LIVES; i++) {
+      this.drawHeart(PLAYFIELD_WIDTH + UI_PANEL_PADDING + 14 + i * 28, 32, 18, i < this.lives);
+    }
+  }
+
+  private drawHeart(x: number, y: number, size: number, filled: boolean): void {
+    const r = size * 0.26;
+    this.livesGfx.fillStyle(filled ? UI_HEART_COLOR : UI_HEART_EMPTY_COLOR, 1);
+    this.livesGfx.fillCircle(x - r * 0.9, y - r * 0.6, r);
+    this.livesGfx.fillCircle(x + r * 0.9, y - r * 0.6, r);
+    this.livesGfx.fillTriangle(
+      x - size * 0.5,
+      y - r * 0.1,
+      x + size * 0.5,
+      y - r * 0.1,
+      x,
+      y + size * 0.6,
+    );
   }
 }

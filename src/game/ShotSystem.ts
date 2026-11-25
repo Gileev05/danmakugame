@@ -17,6 +17,7 @@ import {
   ROCKET_BASE_SPEED,
   ROCKET_FIRE_INTERVAL_MS,
   PLAYER_HEIGHT,
+  PLAYFIELD_WIDTH,
   getShotTier,
 } from './constants';
 import { ShotType, BulletKind, ControlScheme } from './types';
@@ -224,7 +225,7 @@ export class ShotSystem {
       if (
         bullet.y + BULLET_HEIGHT / 2 < 0 ||
         bullet.x < -BULLET_WIDTH ||
-        bullet.x > this.scene.scale.width + BULLET_WIDTH
+        bullet.x > PLAYFIELD_WIDTH + BULLET_WIDTH
       ) {
         bullet.destroy();
       }

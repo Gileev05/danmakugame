@@ -1,5 +1,16 @@
 import { ShotType, Difficulty, AbilityType, AbilityOption, ControlOption } from './types';
 
+// ── Поле и боковая панель UI ────────────────────────────
+export const PLAYFIELD_WIDTH = 600; // ширина игрового поля (без панели UI)
+export const UI_PANEL_WIDTH = 180; // зона интерфейса справа
+export const UI_PANEL_COLOR = 0x020617;
+export const UI_PANEL_BORDER_COLOR = 0x334155;
+export const UI_PANEL_PADDING = 20;
+export const UI_LABEL_COLOR = '#94a3b8';
+export const UI_VALUE_COLOR = '#e2e8f0';
+export const UI_HEART_COLOR = 0xef4444;
+export const UI_HEART_EMPTY_COLOR = 0x334155;
+
 // ── Игрок ────────────────────────────────────────────────
 export const PLAYER_SPEED = 260;
 export const PLAYER_WIDTH = 40;

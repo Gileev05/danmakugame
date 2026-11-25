@@ -41,6 +41,7 @@ import {
   POWER_MAX,
   SHOT_SELECT_POWER,
   DIFFICULTY_PER_POWER,
+  PLAYFIELD_WIDTH,
 } from './constants';
 import { EnemyType, ExplosionShape, Difficulty } from './types';
 
@@ -153,7 +154,7 @@ export class EnemyManager {
     const isShooter =
       shootersAllowed && Phaser.Math.Between(1, 100) <= ENEMY_SHOOTER_CHANCE_PERCENT;
     const margin = ENEMY_SIZE / 2 + 8;
-    const x = Phaser.Math.Between(margin, this.scene.scale.width - margin);
+    const x = Phaser.Math.Between(margin, PLAYFIELD_WIDTH - margin);
     const y = -ENEMY_SIZE / 2;
     const half = ENEMY_SIZE / 2;
 
@@ -309,7 +310,7 @@ export class EnemyManager {
       const margin = ENEMY_BULLET_RADIUS;
       if (
         bullet.x < -margin ||
-        bullet.x > this.scene.scale.width + margin ||
+        bullet.x > PLAYFIELD_WIDTH + margin ||
         bullet.y < -margin ||
         bullet.y > this.scene.scale.height + margin
       ) {
@@ -330,7 +331,7 @@ export class EnemyManager {
 
   private spawnHexagon(power: number): void {
     const margin = HEXAGON_SIZE / 2 + 8;
-    const x = Phaser.Math.Between(margin, this.scene.scale.width - margin);
+    const x = Phaser.Math.Between(margin, PLAYFIELD_WIDTH - margin);
     const y = -HEXAGON_SIZE / 2;
 
     const hex = this.scene.add
